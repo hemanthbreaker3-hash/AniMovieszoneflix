@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} · AniMovieszoneflix{% endblock %}
+{% block head %}
+<style>
+  .detail{display:grid;grid-template-columns:minmax(160px,260px) 1fr;gap:24px;align-items:start}
+  .detail img{width:100%;border-radius:12px;border:1px solid #333;box-shadow:0 12px 40px #000a}
+  .detail h1{font-size:clamp(24px,5vw,42px);line-height:1.1;margin:0 0 10px;font-weight:800}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  .meta span{background:#1a1a1a;border:1px solid #333;padding:5px 11px;border-radius:20px;color:#d1d5db;font-size:12px}
+  .eyebrow{color:#F47521;font-weight:700;font-size:12px;letter-spacing:1px;margin-bottom:6px}
+  .tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .tools .btn-yellow{font-size:13px;padding:10px 16px}
+  .link-box{background:linear-gradient(145deg,#111827,#0b1220);border:1px solid #334155;border-radius:14px;padding:16px;margin-top:18px;box-shadow:0 12px 30px #0005}
+  .link-box h2{font-size:18px;margin:0 0 12px;display:flex;align-items:center;gap:9px}
+  .link-box.watch h2{color:#F47521}.link-box.download h2{color:#E50914}
+  .group-block{background:#0b1728;border:1px solid #263b56;border-radius:10px;padding:12px;margin-top:10px}
+  .group-block h3{font-size:14px;margin:0 0 10px;color:#e5e7eb}
+  .tools{display:flex;flex-wrap:wrap;gap:8px}
+  .tools .btn-yellow{font-size:13px;padding:10px 16px}
+  .groups-pager{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #263b56}
+  .groups-pager .pg-btn{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 12px;font:600 13px system-ui;cursor:pointer}
+  .groups-pager .pg-btn:disabled{opacity:.4;cursor:not-allowed}
+  .groups-pager .pg-info{color:#94a3b8;font-size:13px;min-width:90px;text-align:center}
+  .groups-pager .pg-jump{display:flex;align-items:center;gap:6px;margin-left:auto}
+  .groups-pager .pg-jump label{color:#94a3b8;font-size:12px}
+  .groups-pager .pg-jump input{width:64px;background:#0b1220;border:1px solid #334155;color:#fff;border-radius:8px;padding:8px 10px;font:600 13px system-ui;text-align:center}
+  .groups-pager .pg-jump button{background:#38bdf8;border:0;color:#0b1220;border-radius:8px;padding:8px 12px;font:700 13px system-ui;cursor:pointer}
+  @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:200px}.groups-pager .pg-jump{margin-left:0;width:100%}}
+</style>
+{% endblock %}
+{% block content %}
+<article class="detail">
+  <img src="{% if page.poster_path and page.poster_path.startswith('http') %}{{ page.poster_path }}{% elif page.poster_path %}https://image.tmdb.org/t/p/w500{{ page.poster_path }}{% else %}/static/images/poster.jpg{% endif %}" alt="{{ page.title }} poster">
+  <div>
+    <div class="eyebrow">AniMovieszoneflix · {{ (page.media_type or 'movie')|upper }}</div>
+    <h1>{{ page.title }}</h1>
+    <div class="meta">
+      <span>{{ page.release_date or 'Release date unavailable' }}</span>
+      <span>★ {{ page.rating or 'N/A' }}</span>
+    </div>
+    <p class="muted" style="margin:10px 0 14px;line-height:1.5">{{ page.overview }}</p>
+    {% if page.genres %}
+    <div class="meta">{% for genre in page.genres %}<span>{{ genre }}</span>{% endfor %}</div>
+    {% endif %}
+    {% if page.imdb_id %}<p class="muted" style="margin-top:8px">IMDb: {{ page.imdb_id }}</p>{% endif %}
+    {% if page.tagline %}<p style="margin-top:8px"><em>{{ page.tagline }}</em></p>{% endif %}
+    {% set all_groups = page.groups or [] %}
+    {% for box_key, box_title, box_icon in [('watch', 'Watch', '▶'), ('download', 'Download', '⬇')] %}
+    <section class="link-box {{ box_key }}" aria-label="{{ box_title }} links" data-box="{{ box_key }}">
+      <h2><span aria-hidden="true">{{ box_icon }}</span>{{ box_title }}</h2>
+      {% set box_groups = all_groups|selectattr('box', 'equalto', box_key)|list %}
+      {% if box_key == 'watch' %}{% set box_groups = box_groups + (all_groups|rejectattr('box', 'defined')|list) %}{% endif %}
+      <div class="groups-list" data-box="{{ box_key }}">
+      {% for group in box_groups %}
+      <div class="group-block" data-group-index="{{ loop.index0 }}">
+        <h3>{{ group.name }}</h3>
+        <div class="tools">
+          {% for button in group.buttons or [] %}
+          <a class="btn-yellow cf-media-btn" href="{{ button.url }}" data-raw-url="{{ button.url }}" rel="noopener" target="_blank">{{ button.name }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <p class="muted groups-empty" style="margin:0;font-size:13px">No {{ box_title|lower }} links added yet.</p>
+      {% endfor %}
+      </div>
+      {% if box_groups|length > 5 %}
+      <div class="groups-pager" data-box="{{ box_key }}" data-total="{{ box_groups|length }}" data-per-page="5" hidden>
+        <button type="button" class="pg-btn pg-prev" aria-label="Previous page">← Prev</button>
+        <span class="pg-info">Page <span class="pg-cur">1</span> / <span class="pg-max">1</span></span>
+        <button type="button" class="pg-btn pg-next" aria-label="Next page">Next →</button>
+        <div class="pg-jump">
+          <label for="pg-jump-{{ box_key }}">Go to</label>
+          <input id="pg-jump-{{ box_key }}" class="pg-input" type="number" min="1" inputmode="numeric" placeholder="#">
+          <button type="button" class="pg-go">Go</button>
+        </div>
+      </div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</article>
+<script>
+(async () => {
+  let cfBase = {{ (cloudflare_url if cloudflare_url is defined else '')|tojson }};
+  function rewriteToCloudflare(rawHref, baseOrigin) {
+    if (!rawHref || !baseOrigin) return rawHref;
+    const cleanBase = String(baseOrigin).trim().replace(/\/+$/, '');
+    if (!cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) return rawHref;
+    if (rawHref.startsWith('/')) return cleanBase + rawHref;
+    try {
+      const u = new URL(rawHref, window.location.origin);
+      const cf = new URL(cleanBase);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        u.protocol = cf.protocol;
+        u.host = cf.host;
+        return u.toString();
+      }
+    } catch (_) {}
+    return rawHref;
+  }
+  function applyCloudflareButtons(baseOrigin) {
+    if (!baseOrigin) return;
+    document.querySelectorAll('a.cf-media-btn').forEach(a => {
+      const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
+      const updated = rewriteToCloudflare(raw, baseOrigin);
+      if (updated) a.setAttribute('href', updated);
+    });
+  }
+  if (cfBase) applyCloudflareButtons(cfBase);
+  try {
+    const r = await fetch('/api/site-settings', { cache: 'no-store' });
+    if (r.ok) {
+      const s = await r.json();
+      const latestCf = s.cloudflare_url || s.backend_url || cfBase;
+      if (latestCf) applyCloudflareButtons(latestCf);
+    }
+  } catch (_) {}
+})();
+</script>
+{% endblock %}
+
+<script>
+(function () {
+  const PER = 5;
+  function setupBox(boxKey) {
+    const list = document.querySelector('.groups-list[data-box="' + boxKey + '"]');
+    const pager = document.querySelector('.groups-pager[data-box="' + boxKey + '"]');
+    if (!list) return;
+    const blocks = Array.from(list.querySelectorAll('.group-block'));
+    if (blocks.length <= PER) return;
+    if (pager) pager.hidden = false;
+    let page = 1;
+    const max = Math.max(1, Math.ceil(blocks.length / PER));
+    const curEl = pager && pager.querySelector('.pg-cur');
+    const maxEl = pager && pager.querySelector('.pg-max');
+    const prevBtn = pager && pager.querySelector('.pg-prev');
+    const nextBtn = pager && pager.querySelector('.pg-next');
+    const input = pager && pager.querySelector('.pg-input');
+    const goBtn = pager && pager.querySelector('.pg-go');
+    if (maxEl) maxEl.textContent = String(max);
+    if (input) { input.max = String(max); input.min = '1'; }
+
+    function render() {
+      page = Math.min(Math.max(1, page), max);
+      const start = (page - 1) * PER;
+      const end = start + PER;
+      blocks.forEach((el, i) => { el.style.display = (i >= start && i < end) ? '' : 'none'; });
+      if (curEl) curEl.textContent = String(page);
+      if (prevBtn) prevBtn.disabled = page <= 1;
+      if (nextBtn) nextBtn.disabled = page >= max;
+      if (input) input.value = '';
+    }
+    function goTo(n) {
+      const num = parseInt(n, 10);
+      if (!Number.isFinite(num) || num < 1) return;
+      page = num;
+      render();
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => { page -= 1; render(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { page += 1; render(); });
+    if (goBtn && input) {
+      goBtn.addEventListener('click', () => goTo(input.value));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); goTo(input.value); }
+      });
+      input.addEventListener('change', () => goTo(input.value));
+    }
+    render();
+  }
+  setupBox('watch');
+  setupBox('download');
+})();
+</script>
+
