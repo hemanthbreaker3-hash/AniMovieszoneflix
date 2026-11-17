@@ -93,11 +93,11 @@ def read_env(path):
 values = read_env(p)
 values.update(read_env(pathlib.Path('config.env')))
 # Canonical environment variables win; support aliases used in older deploy commands.
-aliases = {'APP_ID':'API_ID', 'DATABASE_URI':'MONGODB_URI', 'DATABASE_URL':'MONGODB_URI', 'LOG_CHANNEL':'CHANNEL_ID', 'tryurl':'TRYURL', 'TRY_URL':'TRYURL', 'TUNNEL_ORIGIN_HOST':'TRYURL'}
+aliases = {'APP_ID':'API_ID', 'DATABASE_URI':'MONGODB_URI', 'DATABASE_URL':'MONGODB_URI', 'LOG_CHANNEL':'CHANNEL_ID'}
 for alias, canonical in aliases.items():
     if os.environ.get(alias) and not os.environ.get(canonical):
         os.environ[canonical] = os.environ[alias]
-keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','STREAM_CHUNK_SIZE','TRYURL')
+keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','STREAM_CHUNK_SIZE')
 for key in keys:
     if key in os.environ: values[key] = os.environ[key]
 # Also accept legacy alias values from .env/config.env.
@@ -161,29 +161,6 @@ else: print('8000')
 PY
 )"
 PORT_VALUE="${PORT_VALUE:-8000}"
-# TRYURL from: shell export TRYURL=...  →  .env / config.env  →  default
-TRYURL_VALUE="$(python3 - <<'PY'
-from pathlib import Path
-for path in (Path(".env"), Path("config.env")):
-    if not path.exists():
-        continue
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if not s or s.startswith("#") or "=" not in s:
-            continue
-        k, v = s.split("=", 1)
-        k = k.strip()
-        if k in ("TRYURL", "tryurl", "TRY_URL", "TUNNEL_ORIGIN_HOST"):
-            v = v.strip().strip('"').strip("'")
-            if v:
-                print(v)
-                raise SystemExit
-print("138.68.175.206")
-PY
-)"
-TRYURL_VALUE="${TRYURL:-${TRYURL_VALUE:-138.68.175.206}}"
-export TRYURL="$TRYURL_VALUE"
-info "TRYURL (cloudflared origin)=${TRYURL_VALUE}"
 info "Waiting up to 180 seconds for http://127.0.0.1:${PORT_VALUE}/health ..."
 for _ in $(seq 1 90); do
   if curl -fsS "http://127.0.0.1:${PORT_VALUE}/health" >/dev/null 2>&1; then
@@ -225,8 +202,6 @@ Requires=docker.service
 Type=simple
 WorkingDirectory=$SCRIPT_DIR
 Environment=PORT=$PORT_VALUE
-Environment=TRYURL=$TRYURL_VALUE
-EnvironmentFile=-$SCRIPT_DIR/.env
 ExecStart=/usr/local/sbin/file2link-cloudflare-quick-tunnel
 Restart=always
 RestartSec=10

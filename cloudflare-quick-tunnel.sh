@@ -8,44 +8,7 @@ if [[ ! -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 fi
 cd "$SCRIPT_DIR"
-
-# Load .env so TRYURL / PORT from the project file are available
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$SCRIPT_DIR/.env" 2>/dev/null || true
-  set +a
-fi
-
 PORT_VALUE="${PORT:-8000}"
-# Public VPS IP/host for cloudflared origin — from credentials, same as other secrets:
-#   export TRYURL=138.68.175.206
-#   or in .env / config.env:  TRYURL=138.68.175.206
-# shell export wins, then .env (TRYURL / tryurl), then default
-if [[ -z "${TRYURL:-}" ]]; then
-  TRYURL="$(python3 - <<'PY'
-from pathlib import Path
-for path in (Path(".env"), Path("config.env")):
-    if not path.exists():
-        continue
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if not s or s.startswith("#") or "=" not in s:
-            continue
-        k, v = s.split("=", 1)
-        if k.strip() in ("TRYURL", "tryurl", "TRY_URL", "TUNNEL_ORIGIN_HOST"):
-            v = v.strip().strip('"').strip("'")
-            if v:
-                print(v)
-                raise SystemExit
-print("138.68.175.206")
-PY
-)"
-fi
-export TRYURL="${TRYURL:-138.68.175.206}"
-ORIGIN_HOST="${TRYURL}"
-ORIGIN_URL="http://${ORIGIN_HOST}:${PORT_VALUE}"
-
 LOG_FILE="$SCRIPT_DIR/cloudflared-quick-tunnel.log"
 COMPOSE=(docker compose --project-directory "$SCRIPT_DIR" -f "$SCRIPT_DIR/docker-compose.yml" --env-file "$SCRIPT_DIR/.env")
 if ! docker info >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
@@ -59,27 +22,20 @@ if [[ ! -x /usr/local/bin/cloudflared ]]; then
   exit 1
 fi
 
-# Health: accept either local loopback or the public TRYURL origin
-health_ok() {
-  curl -fsS "http://127.0.0.1:${PORT_VALUE}/health" >/dev/null 2>&1 \
-    || curl -fsS "${ORIGIN_URL}/health" >/dev/null 2>&1
-}
-
 for _ in $(seq 1 90); do
-  if health_ok; then
+  if curl -fsS "http://127.0.0.1:${PORT_VALUE}/health" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
-if ! health_ok; then
-  log "File2link health endpoint is not ready on 127.0.0.1:${PORT_VALUE} or ${ORIGIN_URL}; refusing to start the public tunnel."
+curl -fsS "http://127.0.0.1:${PORT_VALUE}/health" >/dev/null || {
+  log 'File2link health endpoint is not ready; refusing to start the public tunnel.'
   exit 1
-fi
+}
 
 : > "$LOG_FILE"
-log "TRYURL=${TRYURL}  PORT=${PORT_VALUE}"
-log "Starting Quick Tunnel origin → ${ORIGIN_URL}"
-/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --loglevel info --url "${ORIGIN_URL}" >"$LOG_FILE" 2>&1 &
+log "Starting Quick Tunnel to http://127.0.0.1:${PORT_VALUE}"
+/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --loglevel info --url "http://127.0.0.1:${PORT_VALUE}" >"$LOG_FILE" 2>&1 &
 CF_PID=$!
 cleanup() {
   if kill -0 "$CF_PID" 2>/dev/null; then kill "$CF_PID" 2>/dev/null || true; fi

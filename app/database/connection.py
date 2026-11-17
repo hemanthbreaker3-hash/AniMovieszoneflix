@@ -36,8 +36,6 @@ class Settings(BaseSettings):
     UPDATE_CHANNEL_URL: str = "https://t.me/HiTLERYT"
     PORT: int = 8000
     DEBUG: bool = False
-    # Public VPS IP/host for cloudflared origin (export TRYURL=x.x.x.x or set in .env / config.env)
-    TRYURL: str = "138.68.175.206"
     SESSIONS: str = ""
     ADMIN_PANEL_TOKEN: str = ""
     TMDB_API_KEY: str = ""
