@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 TG_CHUNK = 1024 * 1024
 DEFAULT_CHUNK = 4 * TG_CHUNK
-MAX_CONCURRENT_PER_CLIENT = 32
-MAX_PARALLEL_STRIPES = 4
+MAX_CONCURRENT_PER_CLIENT = 48
+MAX_PARALLEL_STRIPES = 8
 MEDIA_TARGET_CACHE_TTL = 600
 _resolved_media_targets: dict[tuple, tuple[Client, object, float]] = {}
 _resolved_media_lock = asyncio.Lock()
@@ -475,8 +475,17 @@ async def get_streaming_response(
     content_type = (mime_type or "application/octet-stream").strip()
     if is_download and not content_type:
         content_type = "application/octet-stream"
+    # Prefer video/mp4 for unknown video-ish streams so external players (VLC/MX) detect correctly
+    if not is_download and content_type in ("application/octet-stream", "binary/octet-stream", ""):
+        lower_name = (filename or "").lower()
+        if lower_name.endswith((".mp4", ".mkv", ".mov", ".webm", ".m4v", ".avi", ".ts")):
+            content_type = "video/mp4" if not lower_name.endswith(".webm") else "video/webm"
 
     content_length = end - start + 1
+    # Headers tuned for Chrome, 1DM/ADM/IDM, VLC, MX Player, and HTML5 <video>
+    # - Accept-Ranges + exact Content-Length enable seeking & multi-connection downloads
+    # - keep-alive + no proxy buffering reduce stalls / rebuffering in external players
+    # - public short cache helps resume and repeated range requests without re-auth cost
     headers = {
         "Content-Type": content_type,
         "Content-Length": str(content_length),
@@ -485,7 +494,10 @@ async def get_streaming_response(
         ),
         "Accept-Ranges": "bytes",
         "Content-Encoding": "identity",
-        "Cache-Control": "no-store, no-transform",
+        "Cache-Control": "public, max-age=3600, no-transform",
+        "Pragma": "public",
+        "Connection": "keep-alive",
+        "Keep-Alive": "timeout=75, max=1000",
         "X-Content-Type-Options": "nosniff",
         "X-Accel-Buffering": "no",
         "X-Download-Options": "noopen",

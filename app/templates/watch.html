@@ -174,7 +174,7 @@
     <div class="player-shell">
       <div class="neon-ribbon" aria-hidden="true"></div>
       <div class="player-box">
-        <video id="player" controls playsinline preload="metadata" crossorigin="anonymous">
+        <video id="player" controls playsinline preload="auto" crossorigin="anonymous" controlslist="nodownload">
           <source id="video-source" src="" type="video/mp4">
           Your browser cannot play this media.
         </video>
@@ -324,12 +324,52 @@ function setPlayerSource(src, mime) {
     }, 2000);
   });
 
+  // Buffering / stall recovery for built-in player (and helps after seeks)
   var statusEl = document.getElementById('track-status');
+  var stallTimer = null;
+  var lastStallAt = 0;
+  var stallRecoverCount = 0;
+
+  function clearStallUI() {
+    if (statusEl && (statusEl.textContent === 'Buffering…' || statusEl.textContent.indexOf('Reconnecting') === 0)) {
+      statusEl.textContent = '';
+    }
+  }
+
   player.addEventListener('waiting', function () {
     if (statusEl && !useCompatible) statusEl.textContent = 'Buffering…';
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(function () {
+      // After ~4s of continuous wait, nudge the player to re-request the current range
+      try {
+        if (player.paused || player.ended) return;
+        var now = Date.now();
+        if (now - lastStallAt < 8000) stallRecoverCount++;
+        else stallRecoverCount = 0;
+        lastStallAt = now;
+        if (stallRecoverCount > 4) return; // avoid infinite loop on dead streams
+        var t = player.currentTime || 0;
+        if (statusEl) statusEl.textContent = 'Reconnecting stream…';
+        // Tiny seek forces a new Range request without visible jump
+        player.currentTime = Math.max(0, t + 0.001);
+        player.play().catch(function () {});
+      } catch (_) {}
+    }, 4000);
   });
+
   player.addEventListener('playing', function () {
-    if (statusEl && statusEl.textContent === 'Buffering…') statusEl.textContent = '';
+    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+    clearStallUI();
+  });
+  player.addEventListener('canplaythrough', clearStallUI);
+  player.addEventListener('progress', function () {
+    // When buffer is healthy, clear lingering status
+    try {
+      if (player.buffered && player.buffered.length) {
+        var end = player.buffered.end(player.buffered.length - 1);
+        if (end - (player.currentTime || 0) > 3) clearStallUI();
+      }
+    } catch (_) {}
   });
 })();
 
