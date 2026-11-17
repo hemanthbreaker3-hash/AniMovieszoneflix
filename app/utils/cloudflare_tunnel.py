@@ -25,7 +25,11 @@ _last_synced_url: str | None = None
 
 
 def _update_env_file_urls(tunnel_url: str) -> None:
-    """Persist the auto-detected Cloudflare try URL to .env if writable."""
+    """Persist the auto-detected Cloudflare try URL to .env if writable.
+
+    Never overwrites BASE_URL / BACKEND_URL when they already hold a permanent
+    (non-trycloudflare) domain — those must stay fixed for permanent /dl links.
+    """
     env_path = Path(".env")
     if not env_path.exists():
         return
@@ -36,15 +40,19 @@ def _update_env_file_urls(tunnel_url: str) -> None:
         found_cf = False
         for line in lines:
             if re.match(r"^\s*BACKEND_URL\s*=", line):
+                raw_val = line.split("=", 1)[1].strip().strip('"').strip("'") if "=" in line else ""
                 if not found_backend:
-                    new_lines.append("BACKEND_URL=" + json.dumps(tunnel_url))
+                    # Keep permanent domain; only replace localhost or previous trycloudflare
+                    if not raw_val or raw_val.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(raw_val):
+                        new_lines.append("BACKEND_URL=" + json.dumps(tunnel_url))
+                    else:
+                        new_lines.append(line)
                     found_backend = True
             elif re.match(r"^\s*CLOUDFLARE_URL\s*=", line):
                 if not found_cf:
                     new_lines.append("CLOUDFLARE_URL=" + json.dumps(tunnel_url))
                     found_cf = True
             elif re.match(r"^\s*BASE_URL\s*=", line):
-                # Update BASE_URL if it was localhost or a previous trycloudflare URL
                 raw_val = line.split("=", 1)[1].strip().strip('"').strip("'")
                 if raw_val.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(raw_val):
                     new_lines.append("BASE_URL=" + json.dumps(tunnel_url))
@@ -61,10 +69,34 @@ def _update_env_file_urls(tunnel_url: str) -> None:
         logger.debug("Could not update .env with tunnel URL: %s", exc)
 
 
+async def _has_permanent_backend() -> bool:
+    """True only when admin explicitly set permanent_backend_url (fixed domain mode).
+
+    Stale BASE_URL/BACKEND_URL must not block the live trycloudflare.com tunnel from
+    powering download and watch links.
+    """
+    try:
+        doc = await settings_col.find_one({"key": "permanent_backend_url"}, {"value": 1})
+        val = (doc or {}).get("value")
+        if val and not is_trycloudflare_url(str(val)):
+            try:
+                normalize_public_base_url(str(val))
+                return True
+            except ValueError:
+                return False
+    except Exception:
+        pass
+    return False
+
+
 async def apply_auto_cloudflare_url(raw_url: str, source: str = "auto-cloudflare") -> str | None:
     """
-    Automatically save a detected Cloudflare trycloudflare.com URL into runtime memory and MongoDB,
-    and replace all button URL domains across catalog_pages in MongoDB.
+    Save a detected Cloudflare trycloudflare.com URL for fallback use.
+
+    If a permanent (non-trycloudflare) backend domain is already configured, the temporary
+    Quick Tunnel URL is stored only under cloudflare_url and is NOT written over
+    backend_url / base_url / permanent_backend_url — so existing /dl and /stream links
+    keep working on the fixed domain.
     """
     global _last_synced_url
     try:
@@ -75,28 +107,43 @@ async def apply_auto_cloudflare_url(raw_url: str, source: str = "auto-cloudflare
     if not is_trycloudflare_url(tunnel_url):
         return None
 
-    settings.BACKEND_URL = tunnel_url
-    os.environ["BACKEND_URL"] = tunnel_url
+    permanent = await _has_permanent_backend()
+
+    # Always record the latest Quick Tunnel under cloudflare_url (fallback / recovery)
     os.environ["CLOUDFLARE_URL"] = tunnel_url
-    if (
-        not settings.BASE_URL
-        or settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1"))
-        or is_trycloudflare_url(settings.BASE_URL)
-    ):
-        settings.BASE_URL = tunnel_url
-        os.environ["BASE_URL"] = tunnel_url
+
+    if not permanent:
+        # No fixed domain yet — use the Quick Tunnel as the active public origin
+        settings.BACKEND_URL = tunnel_url
+        os.environ["BACKEND_URL"] = tunnel_url
+        if (
+            not settings.BASE_URL
+            or settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1"))
+            or is_trycloudflare_url(settings.BASE_URL)
+        ):
+            settings.BASE_URL = tunnel_url
+            os.environ["BASE_URL"] = tunnel_url
 
     if _last_synced_url == tunnel_url:
         return tunnel_url
 
     now = datetime.now(timezone.utc)
     try:
-        for key in ("cloudflare_url", "backend_url", "base_url"):
-            await settings_col.update_one(
-                {"key": key},
-                {"$set": {"value": tunnel_url, "updated_by": source, "updated_at": now}},
-                upsert=True,
-            )
+        # Always update the temporary tunnel slot
+        await settings_col.update_one(
+            {"key": "cloudflare_url"},
+            {"$set": {"value": tunnel_url, "updated_by": source, "updated_at": now}},
+            upsert=True,
+        )
+
+        if not permanent:
+            for key in ("backend_url", "base_url"):
+                await settings_col.update_one(
+                    {"key": key},
+                    {"$set": {"value": tunnel_url, "updated_by": source, "updated_at": now}},
+                    upsert=True,
+                )
+        # When permanent is set, leave backend_url / base_url / permanent_backend_url untouched
 
         # Keep website_urls exclusively for Vercel / non-tunnel website domains
         web_doc = await settings_col.find_one({"key": "website_urls"}, {"value": 1})
@@ -108,25 +155,47 @@ async def apply_auto_cloudflare_url(raw_url: str, source: str = "auto-cloudflare
                     {"$set": {"value": cleaned_web, "updated_at": now}},
                 )
 
-        # Automatically replace all button URL domains in catalog_pages with the new Cloudflare try URL
         rewritten_pages = 0
-        cursor = db.catalog_pages.find({"groups.0": {"$exists": True}}, {"_id": 1, "groups": 1})
-        async for doc in cursor:
-            old_groups = doc.get("groups") or []
-            new_groups = rewrite_page_groups_to_cloudflare(old_groups, tunnel_url)
-            if new_groups != old_groups:
-                await db.catalog_pages.update_one(
-                    {"_id": doc["_id"]},
-                    {"$set": {"groups": new_groups, "updated_at": now}},
-                )
-                rewritten_pages += 1
+        # Only rewrite catalog button domains when Quick Tunnel is the active public origin.
+        # With a permanent domain, never rotate buttons onto a temporary trycloudflare host.
+        if not permanent:
+            cursor = db.catalog_pages.find({"groups.0": {"$exists": True}}, {"_id": 1, "groups": 1})
+            async for doc in cursor:
+                old_groups = doc.get("groups") or []
+                new_groups = rewrite_page_groups_to_cloudflare(old_groups, tunnel_url)
+                if new_groups != old_groups:
+                    await db.catalog_pages.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"groups": new_groups, "updated_at": now}},
+                    )
+                    rewritten_pages += 1
+            _update_env_file_urls(tunnel_url)
+        else:
+            # Permanent domain mode: only record CLOUDFLARE_URL in env, never BASE/BACKEND
+            try:
+                env_path = Path(".env")
+                if env_path.exists():
+                    lines = env_path.read_text().splitlines()
+                    new_lines, found_cf = [], False
+                    for line in lines:
+                        if re.match(r"^\s*CLOUDFLARE_URL\s*=", line):
+                            if not found_cf:
+                                new_lines.append("CLOUDFLARE_URL=" + json.dumps(tunnel_url))
+                                found_cf = True
+                        else:
+                            new_lines.append(line)
+                    if not found_cf:
+                        new_lines.append("CLOUDFLARE_URL=" + json.dumps(tunnel_url))
+                    env_path.write_text("\n".join(new_lines) + "\n")
+            except Exception as exc:
+                logger.debug("Could not update CLOUDFLARE_URL in .env: %s", exc)
 
-        _update_env_file_urls(tunnel_url)
         _last_synced_url = tunnel_url
         logger.info(
-            "Auto-set Cloudflare URL (%s): %s (rewrote button domains on %d catalog pages)",
+            "Auto-set Cloudflare URL (%s): %s (permanent_backend=%s, rewrote button domains on %d catalog pages)",
             source,
             tunnel_url,
+            permanent,
             rewritten_pages,
         )
     except Exception as exc:

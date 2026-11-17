@@ -131,44 +131,78 @@ def _valid_public_candidate(value: str | None) -> str | None:
 
 async def get_active_cloudflare_url() -> str | None:
     """
-    Resolve the active Cloudflare tunnel URL (https://*.trycloudflare.com) used exclusively
-    for download links (/dl/), stream/watch links (/watch/, /stream/, /remux/), and catalog button URLs.
+    Resolve the public origin used for download (/dl/), stream/watch (/watch/, /stream/, /remux/),
+    and catalog button URLs.
+
+    Priority (so Cloudflare Quick Tunnel works for download/watch right now, while permanent
+    domains still stick when explicitly configured):
+
+    1. permanent_backend_url — only when admin set a fixed domain via /backendurl or /baseurl
+    2. Latest cloudflare_url / CLOUDFLARE_URL if it is *.trycloudflare.com (live tunnel)
+    3. backend_url / BACKEND_URL if it is *.trycloudflare.com
+    4. Any other non-Vercel public backend_url / base_url (Named Tunnel / custom domain)
+    5. Remaining public candidates (never prefer Vercel for media links)
     """
     try:
         rows = await settings_col.find(
-            {"key": {"$in": ["cloudflare_url", "backend_url", "base_url"]}},
+            {"key": {"$in": ["cloudflare_url", "backend_url", "base_url", "permanent_backend_url"]}},
             {"key": 1, "value": 1},
-        ).to_list(10)
+        ).to_list(12)
         stored = {r["key"]: r.get("value") for r in rows if isinstance(r, dict) and "key" in r}
     except Exception:
         stored = {}
 
-    candidates = [
+    def _norm(v) -> str | None:
+        return _valid_public_candidate(str(v) if v else None)
+
+    permanent = _norm(stored.get("permanent_backend_url"))
+    if permanent and not is_trycloudflare_url(permanent) and not is_vercel_url(permanent):
+        return permanent
+
+    # Live Quick Tunnel — must win for download/watch when no permanent domain is set
+    for raw in (
         stored.get("cloudflare_url"),
-        stored.get("backend_url"),
         os.environ.get("CLOUDFLARE_URL"),
+        stored.get("backend_url"),
         settings.BACKEND_URL,
+        os.environ.get("BACKEND_URL"),
         stored.get("base_url"),
         settings.BASE_URL,
-    ]
-
-    valid_candidates = []
-    for c in candidates:
-        norm = _valid_public_candidate(str(c) if c else None)
-        if norm and norm not in valid_candidates:
-            valid_candidates.append(norm)
-
-    # 1. Always prefer any *.trycloudflare.com URL
-    for c in valid_candidates:
-        if is_trycloudflare_url(c):
+        os.environ.get("BASE_URL"),
+    ):
+        c = _norm(raw)
+        if c and is_trycloudflare_url(c):
             return c
 
-    # 2. Next prefer any non-Vercel backend URL
-    for c in valid_candidates:
-        if not is_vercel_url(c):
+    # Explicit non-try backend (Named Tunnel / custom domain) without permanent key
+    for raw in (
+        stored.get("backend_url"),
+        settings.BACKEND_URL,
+        os.environ.get("BACKEND_URL"),
+        stored.get("base_url"),
+        settings.BASE_URL,
+        os.environ.get("BASE_URL"),
+    ):
+        c = _norm(raw)
+        if c and not is_trycloudflare_url(c) and not is_vercel_url(c):
             return c
 
-    return valid_candidates[0] if valid_candidates else None
+    # Last resort: any valid public URL that is not Vercel
+    for raw in (
+        stored.get("cloudflare_url"),
+        stored.get("backend_url"),
+        stored.get("base_url"),
+        settings.BACKEND_URL,
+        settings.BASE_URL,
+        os.environ.get("CLOUDFLARE_URL"),
+        os.environ.get("BACKEND_URL"),
+        os.environ.get("BASE_URL"),
+    ):
+        c = _norm(raw)
+        if c and not is_vercel_url(c):
+            return c
+
+    return None
 
 
 async def get_active_vercel_website_url() -> str | None:

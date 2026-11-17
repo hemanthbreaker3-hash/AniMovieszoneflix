@@ -763,9 +763,15 @@ def register_handlers(bot):
         if log_cf:
             await apply_auto_cloudflare_url(log_cf, source="media-upload-check")
 
+        # Prefer live Cloudflare tunnel for download/watch links when available
         media_base = await get_active_cloudflare_url()
+        if not media_base and log_cf:
+            try:
+                media_base = normalize_public_base_url(log_cf)
+            except ValueError:
+                media_base = None
         if media_base:
-            base_url = media_base
+            base_url = media_base.rstrip("/")
             links_ready = True
         else:
             try:
@@ -1041,13 +1047,23 @@ def register_handlers(bot):
             if log_cf:
                 await apply_auto_cloudflare_url(log_cf, source="telegram-message-link")
             base_url = await get_active_cloudflare_url()
+            if not base_url and log_cf:
+                try:
+                    base_url = normalize_public_base_url(log_cf)
+                except ValueError:
+                    base_url = None
             if not base_url:
                 try:
                     base_url = normalize_public_base_url(settings.BASE_URL)
                 except ValueError:
                     base_url = None
             if not base_url:
-                return await status.edit_text("⚠️ Media access is confirmed, but the public link host is not configured yet. Set /baseurl and retry.")
+                return await status.edit_text(
+                    "⚠️ Media access is confirmed, but the public Cloudflare / backend URL is not ready yet.\n\n"
+                    "Wait a few seconds for the tunnel, or set:\n"
+                    "`/backendurl https://your-name.trycloudflare.com`"
+                )
+            base_url = str(base_url).rstrip("/")
 
             links, buttons = [], []
             if downloads_enabled:
@@ -1411,26 +1427,30 @@ def register_handlers(bot):
         current = (await get_active_cloudflare_url()) or settings.BACKEND_URL or "Auto-detecting"
         if len(args) < 2:
             return await message.reply(
-                "☁️ **Cloudflare Tunnel URL**\n\n"
-                f"> Current Auto Cloudflare URL: `{current}`\n\n"
-                "Usage: `/backendurl https://your-tunnel.trycloudflare.com`\n"
-                "This URL is auto-detected by the VPS and automatically used for all download links, stream links, and button URLs."
+                "☁️ **Backend / Stream URL**\n\n"
+                f"> Current active URL: `{current}`\n\n"
+                "Usage:\n"
+                "• Permanent: `/backendurl https://dl.yourdomain.com`\n"
+                "• Temporary: `/backendurl https://name.trycloudflare.com`\n\n"
+                "A **permanent** domain (Named Tunnel or any fixed HTTPS host) keeps `/dl/` and `/stream/` links working forever. "
+                "Quick Tunnel URLs change when the tunnel restarts and will not overwrite a permanent domain."
             )
         candidate = args[1].strip()
         try:
             candidate = normalize_public_base_url(candidate)
             now = datetime.datetime.utcnow()
+            permanent = not is_trycloudflare_url(candidate)
             await settings_col.update_one(
                 {"key": "backend_url"},
                 {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
                 upsert=True,
             )
-            await settings_col.update_one(
-                {"key": "cloudflare_url"},
-                {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
-                upsert=True,
-            )
-            if is_trycloudflare_url(candidate) or settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(settings.BASE_URL):
+            if permanent:
+                await settings_col.update_one(
+                    {"key": "permanent_backend_url"},
+                    {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
+                    upsert=True,
+                )
                 await settings_col.update_one(
                     {"key": "base_url"},
                     {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
@@ -1438,13 +1458,30 @@ def register_handlers(bot):
                 )
                 settings.BASE_URL = candidate
                 os.environ["BASE_URL"] = candidate
+            else:
+                await settings_col.update_one(
+                    {"key": "cloudflare_url"},
+                    {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
+                    upsert=True,
+                )
+                if settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(settings.BASE_URL):
+                    await settings_col.update_one(
+                        {"key": "base_url"},
+                        {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
+                        upsert=True,
+                    )
+                    settings.BASE_URL = candidate
+                    os.environ["BASE_URL"] = candidate
             settings.BACKEND_URL = candidate
+            os.environ["BACKEND_URL"] = candidate
             rewritten = await rewrite_all_stored_catalog_buttons(candidate)
+            mode = "permanent (links will not rotate)" if permanent else "temporary Quick Tunnel"
             await message.reply(
-                "✅ **Cloudflare URL Saved & Synced!**\n\n"
-                f"> ☁️ **Cloudflare URL:** `{candidate}`\n"
+                "✅ **Backend URL Saved & Synced!**\n\n"
+                f"> 🔗 **URL:** `{candidate}`\n"
+                f"> 📌 **Mode:** `{mode}`\n"
                 f"> 🔄 **Catalog Pages Rewritten:** `{rewritten}`\n\n"
-                "All download links (`/dl/`), stream links (`/watch/`, `/stream/`), and website button URLs now use this Cloudflare URL."
+                "All download links (`/dl/`), stream links (`/watch/`, `/stream/`), and website button URLs now use this host."
             )
         except ValueError as exc:
             await message.reply(f"❌ Invalid backend URL: `{html.escape(str(exc))}`")
@@ -1466,10 +1503,13 @@ def register_handlers(bot):
         if len(args) < 2:
             current_cf = (await get_active_cloudflare_url()) or settings.BASE_URL
             return await message.reply(
-                "🌐 **Cloudflare / Base URL Management**\n\n"
-                f"> 🔗 **Current Active Cloudflare URL:** `{current_cf}`\n"
+                "🌐 **Base / Stream URL Management**\n\n"
+                f"> 🔗 **Current active URL:** `{current_cf}`\n"
                 f"> 📢 **Updates Channel:** `{settings.UPDATE_CHANNEL_URL}`\n\n"
-                "*(Cloudflare Try URL is set automatically on startup, or override with `/baseurl https://name.trycloudflare.com`)*"
+                "Set a **permanent** domain so `/dl/` and `/stream/` links never break:\n"
+                "`/baseurl https://dl.yourdomain.com`\n\n"
+                "Temporary Quick Tunnel (changes on restart):\n"
+                "`/baseurl https://name.trycloudflare.com`"
             )
         new_url = args[1].strip()
         try:
@@ -1478,10 +1518,12 @@ def register_handlers(bot):
             return await message.reply(
                 "❌ **Invalid public Base URL**\n\n"
                 f"> {html.escape(str(exc))}\n\n"
-                "Use your public URL, for example: `/baseurl https://name.trycloudflare.com`"
+                "Example permanent: `/baseurl https://dl.yourdomain.com`\n"
+                "Example temporary: `/baseurl https://name.trycloudflare.com`"
             )
         try:
             now = datetime.datetime.utcnow()
+            permanent = not is_trycloudflare_url(new_url)
             await settings_col.update_one(
                 {"key": "base_url"},
                 {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
@@ -1490,7 +1532,22 @@ def register_handlers(bot):
             settings.BASE_URL = new_url
             os.environ["BASE_URL"] = new_url
             rewritten = 0
-            if is_trycloudflare_url(new_url) or not settings.BACKEND_URL or is_trycloudflare_url(settings.BACKEND_URL):
+            if permanent:
+                # Fixed domain: mark as permanent so Quick Tunnel can never rotate links
+                settings.BACKEND_URL = new_url
+                os.environ["BACKEND_URL"] = new_url
+                await settings_col.update_one(
+                    {"key": "backend_url"},
+                    {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
+                    upsert=True,
+                )
+                await settings_col.update_one(
+                    {"key": "permanent_backend_url"},
+                    {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
+                    upsert=True,
+                )
+                rewritten = await rewrite_all_stored_catalog_buttons(new_url)
+            elif is_trycloudflare_url(new_url) or not settings.BACKEND_URL or is_trycloudflare_url(settings.BACKEND_URL):
                 settings.BACKEND_URL = new_url
                 await settings_col.update_one(
                     {"key": "backend_url"},
@@ -1509,12 +1566,14 @@ def register_handlers(bot):
                     {"$addToSet": {"value": new_url}, "$set": {"updated_at": now}},
                     upsert=True,
                 )
+            mode = "permanent (links will not rotate)" if permanent else "temporary / other"
             await message.reply(
                 "🌐 **Base URL Updated Successfully!**\n\n"
                 f"> 🔗 **New URL:** `{new_url}`\n"
+                f"> 📌 **Mode:** `{mode}`\n"
                 f"> 🔄 **Catalog Pages Rewritten:** `{rewritten}`\n"
                 f"> 👤 **Updated By:** `{user.id}`\n\n"
-                "✨ *All download links, stream links, and website button URLs now use this Cloudflare URL.*"
+                "✨ *Download and stream links now use this host.*"
             )
         except Exception as e:
             logger.error("Error updating baseurl: %s", e)

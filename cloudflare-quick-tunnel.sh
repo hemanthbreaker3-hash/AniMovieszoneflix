@@ -64,23 +64,39 @@ fi
 log "Generated public Cloudflare Try URL: $TUNNEL_URL"
 
 # Update .env with the generated Cloudflare Try URL.
+# Never overwrite BASE_URL / BACKEND_URL when they already hold a permanent (non-trycloudflare) domain.
 python3 - "$SCRIPT_DIR/.env" "$TUNNEL_URL" <<'PY'
 import json, pathlib, re, sys
 path = pathlib.Path(sys.argv[1])
 url = sys.argv[2]
+
+def is_try(v: str) -> bool:
+    v = (v or "").strip().strip('"').strip("'").lower()
+    return "trycloudflare.com" in v
+
+def is_local(v: str) -> bool:
+    v = (v or "").strip().strip('"').strip("'").lower()
+    return v.startswith("http://localhost") or v.startswith("http://127.0.0.1") or not v
+
 lines = path.read_text().splitlines() if path.exists() else []
 new_lines = []
-found_base = False
-found_backend = False
-found_cf = False
+found_base = found_backend = found_cf = False
 for line in lines:
     if re.match(r'^\s*BASE_URL\s*=', line):
         if not found_base:
-            new_lines.append('BASE_URL=' + json.dumps(url))
+            raw = line.split('=', 1)[1] if '=' in line else ''
+            if is_local(raw) or is_try(raw):
+                new_lines.append('BASE_URL=' + json.dumps(url))
+            else:
+                new_lines.append(line)  # keep permanent domain
             found_base = True
     elif re.match(r'^\s*BACKEND_URL\s*=', line):
         if not found_backend:
-            new_lines.append('BACKEND_URL=' + json.dumps(url))
+            raw = line.split('=', 1)[1] if '=' in line else ''
+            if is_local(raw) or is_try(raw):
+                new_lines.append('BACKEND_URL=' + json.dumps(url))
+            else:
+                new_lines.append(line)  # keep permanent domain
             found_backend = True
     elif re.match(r'^\s*CLOUDFLARE_URL\s*=', line):
         if not found_cf:
@@ -98,8 +114,9 @@ path.write_text('\n'.join(new_lines) + '\n')
 path.chmod(0o600)
 PY
 
-# Persist the Cloudflare Try URL in MongoDB and automatically rewrite all catalog button URLs.
-# Note: website_urls is kept strictly for the Vercel website (never trycloudflare.com).
+# Persist the Cloudflare Try URL in MongoDB.
+# If permanent_backend_url / a non-trycloudflare backend_url is already set, only update cloudflare_url
+# and do NOT rewrite catalog buttons onto the temporary host.
 if ! "${COMPOSE[@]}" exec -T web python -c '
 import asyncio, datetime, os, sys
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -114,12 +131,37 @@ async def main():
     db = client[os.environ.get("DATABASE_NAME", "tg_media_bot")]
     now = datetime.datetime.now(datetime.timezone.utc)
     tunnel_url = sys.argv[1].strip().rstrip("/")
-    for key in ("base_url", "backend_url", "cloudflare_url"):
-        await db.settings.update_one(
-            {"key": key},
-            {"$set": {"value": tunnel_url, "updated_by": "cloudflare-deployment", "updated_at": now}},
-            upsert=True,
-        )
+
+    # Permanent only when admin explicitly set permanent_backend_url
+    permanent = False
+    doc = await db.settings.find_one({"key": "permanent_backend_url"}, {"value": 1})
+    val = (doc or {}).get("value")
+    if val and not is_trycloudflare_url(str(val)):
+        permanent = True
+
+    # Always store the latest Quick Tunnel under cloudflare_url
+    await db.settings.update_one(
+        {"key": "cloudflare_url"},
+        {"$set": {"value": tunnel_url, "updated_by": "cloudflare-deployment", "updated_at": now}},
+        upsert=True,
+    )
+
+    if not permanent:
+        for key in ("base_url", "backend_url"):
+            await db.settings.update_one(
+                {"key": key},
+                {"$set": {"value": tunnel_url, "updated_by": "cloudflare-deployment", "updated_at": now}},
+                upsert=True,
+            )
+        async for doc in db.catalog_pages.find({"groups.0": {"$exists": True}}, {"_id": 1, "groups": 1}):
+            old_groups = doc.get("groups") or []
+            new_groups = rewrite_page_groups_to_cloudflare(old_groups, tunnel_url)
+            if new_groups != old_groups:
+                await db.catalog_pages.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"groups": new_groups, "updated_at": now}},
+                )
+
     web_doc = await db.settings.find_one({"key": "website_urls"}, {"value": 1})
     if web_doc and isinstance(web_doc.get("value"), list):
         cleaned = [u for u in web_doc["value"] if not is_trycloudflare_url(str(u))]
@@ -127,14 +169,6 @@ async def main():
             {"key": "website_urls"},
             {"$set": {"value": cleaned, "updated_at": now}},
         )
-    async for doc in db.catalog_pages.find({"groups.0": {"$exists": True}}, {"_id": 1, "groups": 1}):
-        old_groups = doc.get("groups") or []
-        new_groups = rewrite_page_groups_to_cloudflare(old_groups, tunnel_url)
-        if new_groups != old_groups:
-            await db.catalog_pages.update_one(
-                {"_id": doc["_id"]},
-                {"$set": {"groups": new_groups, "updated_at": now}},
-            )
     client.close()
 
 asyncio.run(main())
