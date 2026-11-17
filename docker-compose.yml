@@ -13,6 +13,7 @@ services:
       DATABASE_NAME: ${DATABASE_NAME:-tg_media_bot}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       PORT: ${PORT:-8000}
+      TRYURL: ${TRYURL:-138.68.175.206}
     depends_on:
       redis:
         condition: service_healthy
