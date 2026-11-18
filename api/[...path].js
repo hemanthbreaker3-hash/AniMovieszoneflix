@@ -2050,7 +2050,30 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   const posterUrl = String(extra.posterUrl || '');
   const groupName = (watchGroups[groupIndex] && watchGroups[groupIndex].name) || '';
 
-  const headExtra = `<style>
+  const headExtra = `
+<script>
+(function () {
+  var CDN = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/';
+  var params = new URLSearchParams(window.location.search);
+  var forced = params.get('engine');
+  var canWasm = false;
+  try { canWasm = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { canWasm = false; }
+  var engine = (forced === 'wasm' || forced === 'native') ? forced : (canWasm ? 'wasm' : 'native');
+  window.__AniMoviesZoneflixPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
+  function addLink(rel, href, attrs) {
+    var l = document.createElement('link');
+    l.rel = rel; l.href = href;
+    if (attrs) Object.keys(attrs).forEach(function (k) { l.setAttribute(k, attrs[k]); });
+    document.head.appendChild(l);
+  }
+  addLink('preconnect', 'https://cdn.jsdelivr.net', { crossorigin: '' });
+  if (engine === 'wasm') {
+    addLink('modulepreload', CDN + 'element.slim.js');
+    addLink('preload', CDN + 'movi.wasm', { as: 'fetch', crossorigin: 'anonymous' });
+  }
+})();
+</script>
+<style>
     ${!settings.built_in_player_enabled ? '.player-shell,.card.info{display:none!important}' : ''}
     ${!settings.streaming_enabled ? '.player-shell{display:none!important}' : ''}
     .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(255,106,0,.18)}
@@ -2126,8 +2149,9 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
             playsinline controls preload="auto" resume
             theme="dark" themecolor="#ff6a00"
             subtitleedge="outline"
-            style="display:block;width:100%;height:100%"
+            style="display:none;width:100%;height:100%"
             tabindex="0"></movi-player>
+          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()">Buffering? Switch to basic player</button>
           <video id="player" controls playsinline preload="auto" style="display:none;width:100%;height:100%;object-fit:contain;background:#000"></video>
           <div id="playerLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2">
             <div style="width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#ff6a00;animation:ddspin .8s linear infinite"></div>
@@ -2202,112 +2226,141 @@ const POSTER_URL = ${safeJsonForScript(posterUrl)};
 const FILESTORE_USER = ${safeJsonForScript(fsUser)};
 const FILE_NAME = ${safeJsonForScript(file.filename || '')};
 
-// Browser cannot play most MKV/AVI in native <video>. Prefer remux (mp4) for those.
-const mimeLower = String(PLAYER_MIME || '').toLowerCase();
-const nameLower = String(FILE_NAME || '').toLowerCase();
-const needsRemux = /matroska|x-matroska|\.mkv\b|video\/avi|video\/x-msvideo|\.avi\b|video\/x-ms-wmv|\.wmv\b/.test(mimeLower + ' ' + nameLower);
+const FILE_URL = STREAM_URL;
 const REMUX_URL = STREAM_ORIGIN + '/remux/' + SHORT_CODE;
-// PLAY_URL: remux for incompatible containers; raw stream otherwise
-let PLAY_URL = needsRemux ? REMUX_URL : STREAM_URL;
-// External players still get the original stream/download URL
-const EXTERNAL_STREAM = STREAM_URL;
+const CFG = window.__AniMoviesZoneflixPlayer || {};
+const MODULE_URL = (CFG.cdn || 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/') + 'element.slim.js';
+const MOVI_GLOBAL = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js';
+const MOVI_GLOBAL_FALLBACK = 'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js';
 
-const player = document.getElementById('player');
 const moviPlayer = document.getElementById('moviPlayer');
+const nativePlayer = document.getElementById('player') || document.getElementById('nativePlayer');
 const loadingEl = document.getElementById('playerLoading');
-function hideLoading(){ if (loadingEl) loadingEl.style.display = 'none'; }
-function showLoading(){ if (loadingEl) loadingEl.style.display = 'flex'; }
+const nativeSwitch = document.getElementById('nativeSwitch');
 
-function loadScript(src) {
+let engine = CFG.engine || 'native';
+const forcedEngine = !!CFG.forced;
+let wasmLoading = false, wasmLoaded = false, wasmWired = false;
+let nativeLoaded = false, browserMode = false;
+
+function hideLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.remove('active'); loadingEl.style.display = 'none'; } }
+function showLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.add('active'); loadingEl.style.display = 'flex'; } }
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  const m = document.getElementById('toast-message');
+  if (m) m.textContent = msg || 'OK';
+  if (t) { t.classList.add('active'); setTimeout(() => t.classList.remove('active'), 2200); }
+}
+
+function warmMedia(url) {
+  try { fetch(url, { headers: { Range: 'bytes=0-65535' }, priority: 'low' }).then(r => r.arrayBuffer()).catch(() => {}); } catch (_) {}
+}
+
+function initNative(reason) {
+  engine = 'native';
+  if (moviPlayer) moviPlayer.style.display = 'none';
+  if (nativePlayer) {
+    nativePlayer.style.display = 'block';
+    try { nativePlayer.removeAttribute('crossorigin'); } catch (_) {}
+    if (!nativeLoaded) {
+      nativeLoaded = true;
+      nativePlayer.src = FILE_URL;
+      try { nativePlayer.load(); } catch (_) {}
+      try { const p = nativePlayer.play(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+      nativePlayer.addEventListener('error', () => {
+        if (nativePlayer.src.indexOf('/remux/') === -1) {
+          nativePlayer.src = REMUX_URL;
+          try { nativePlayer.load(); } catch (_) {}
+        } else {
+          hideLoading();
+          showToast('Cannot play here — use Download or external player');
+        }
+      }, { once: true });
+    }
+  }
+  nativePlayer && nativePlayer.addEventListener('playing', hideLoading, { once: true });
+  nativePlayer && nativePlayer.addEventListener('canplay', hideLoading, { once: true });
+  if (reason) console.debug('[player] native:', reason);
+  setTimeout(hideLoading, 12000);
+}
+
+function startWasm() {
+  if (!wasmWired && moviPlayer) {
+    wasmWired = true;
+    moviPlayer.addEventListener('playing', hideLoading);
+    moviPlayer.addEventListener('canplay', hideLoading);
+    moviPlayer.addEventListener('error', () => { if (!forcedEngine) initNative('wasm-error'); });
+    moviPlayer.addEventListener('nativefallback', () => { if (!forcedEngine) initNative('nativefallback'); });
+  }
+  if (moviPlayer) {
+    moviPlayer.style.display = 'block';
+    if (nativePlayer) nativePlayer.style.display = 'none';
+    if (!wasmLoaded) {
+      wasmLoaded = true;
+      moviPlayer.src = FILE_URL;
+      try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
+    }
+  }
+  setTimeout(hideLoading, 15000);
+}
+
+function loadGlobalScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
+    s.src = src; s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('load fail ' + src));
+    s.onerror = () => reject(new Error('fail'));
     document.head.appendChild(s);
   });
 }
 
-async function initMoviPlayer(url) {
-  const cdns = [
-    'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js',
-    'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js',
-  ];
-  let loaded = false;
-  for (const src of cdns) {
-    try {
-      await loadScript(src);
-      loaded = true;
-      break;
-    } catch (_) {}
-  }
-  if (!loaded || !window.customElements) {
-    throw new Error('movi-player unavailable');
-  }
-  try {
-    await Promise.race([
-      customElements.whenDefined('movi-player'),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
-    ]);
-  } catch (_) {
-    if (!customElements.get('movi-player')) throw new Error('movi-player unavailable');
-  }
-  if (moviPlayer) {
-    moviPlayer.style.display = 'block';
-    if (player) player.style.display = 'none';
-    moviPlayer.src = url;
-    try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
-    const done = () => hideLoading();
-    moviPlayer.addEventListener('playing', done, { once: true });
-    moviPlayer.addEventListener('loadeddata', done, { once: true });
-    moviPlayer.addEventListener('error', () => {
-      // Fallback to native remux (mp4) if enhanced player cannot decode
-      console.warn('movi-player error, falling back to remux');
-      initNativePlayer(REMUX_URL);
-    }, { once: true });
-    setTimeout(done, 10000);
-  }
-}
+function initWasm() {
+  if (wasmLoading) return;
+  wasmLoading = true;
+  const timer = setTimeout(() => {
+    if (!forcedEngine) initNative('module-timeout');
+    else { hideLoading(); showToast('Player timed out'); }
+  }, 45000);
 
-function initNativePlayer(url) {
-  if (!player) return;
-  if (moviPlayer) moviPlayer.style.display = 'none';
-  player.style.display = 'block';
-  // Avoid crossorigin for simpler playback across ngrok when possible
-  try { player.removeAttribute('crossorigin'); } catch (_) {}
-  player.src = url;
-  try { player.load(); } catch (_) {}
-  const done = () => hideLoading();
-  player.addEventListener('playing', done, { once: true });
-  player.addEventListener('loadeddata', done, { once: true });
-  player.addEventListener('error', () => {
-    // If stream fails and we were not on remux, try remux once
-    if (url !== REMUX_URL) {
-      showLoading();
-      player.src = REMUX_URL;
-      try { player.load(); } catch (_) {}
-    } else {
-      hideLoading();
+  import(MODULE_URL).then(() => {
+    clearTimeout(timer);
+    wasmLoading = false;
+    if (!customElements.get('movi-player')) {
+      if (!forcedEngine) initNative('element-missing');
+      return;
     }
-  }, { once: true });
-  setTimeout(done, 10000);
-  try {
-    const p = player.play();
-    if (p && p.catch) p.catch(() => {});
-  } catch (_) {}
+    startWasm();
+  }).catch(() => {
+    return loadGlobalScript(MOVI_GLOBAL).catch(() => loadGlobalScript(MOVI_GLOBAL_FALLBACK)).then(async () => {
+      clearTimeout(timer);
+      wasmLoading = false;
+      try { await customElements.whenDefined('movi-player'); } catch (_) {}
+      if (!customElements.get('movi-player')) {
+        if (!forcedEngine) initNative('element-missing');
+        return;
+      }
+      startWasm();
+    });
+  }).catch(() => {
+    clearTimeout(timer);
+    wasmLoading = false;
+    if (!forcedEngine) initNative('module-load-failed');
+    else { hideLoading(); showToast('Could not load player'); }
+  });
 }
 
-(async function bootPlayer() {
-  showLoading();
-  // Always use movi-player first (same as full watch.html), STREAM_URL for multi-audio/MKV
-  try {
-    await initMoviPlayer(STREAM_URL);
-  } catch (e) {
-    console.warn('Enhanced player failed, using native/remux', e);
-    initNativePlayer(PLAY_URL);
-  }
-})();
+function switchEngine() {
+  if (engine !== 'wasm' || browserMode) return;
+  try { moviPlayer.pause(); } catch (e) {}
+  initNative('user-switch');
+  showToast('Basic player');
+}
+
+// Boot like DDStream: wasm first when WebGL2 available
+showLoading();
+if (engine === 'wasm') { warmMedia(FILE_URL); initWasm(); }
+else initNative(forcedEngine ? 'forced-native' : 'no-webgl2');
+setTimeout(() => { if (engine === 'wasm' && nativeSwitch) nativeSwitch.hidden = false; }, 12000);
 
 const dlBtn = document.getElementById('direct-dl-btn');
 if (dlBtn) dlBtn.href = DL_URL;
