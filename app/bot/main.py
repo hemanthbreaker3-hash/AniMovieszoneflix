@@ -67,6 +67,9 @@ _awaiting_link_admins: set[int] = set()
 
 # /addgroups state: user_id -> {"page_slug": str, "box": "watch"|"download"}
 _awaiting_addgroups: dict[int, dict] = {}
+# Short tokens for callback_data (Telegram limit 64 bytes) -> page slug
+# token is ~8 hex chars so callback stays well under the limit even with long slugs
+_addgroups_slug_tokens: dict[str, str] = {}
 # /save restore: set of admin user_ids waiting for a backup ZIP
 _awaiting_restore: set[int] = set()
 
@@ -2704,19 +2707,28 @@ def register_handlers(bot):
                 url = getattr(ent, "url", None)
                 if url and "/title/" in url:
                     source_text = f"{source_text} {url}"
+        # Keep full argument text — do not truncate long slugs/URLs
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) > 1:
             source_text = (source_text + " " + parts[1]).strip()
 
         page_slug = None
-        match = re.search(r"/title/([A-Za-z0-9_-]+)", source_text or "", re.I)
+        # Support arbitrarily long slugs (letters, digits, hyphen, underscore)
+        match = re.search(r"/title/([A-Za-z0-9][A-Za-z0-9_-]{0,500})", source_text or "", re.I)
         if match:
-            page_slug = match.group(1).lower()
+            page_slug = match.group(1).lower().rstrip("/")
         elif parts and len(parts) > 1:
-            # Bare slug: /addgroups premada-oorali
-            bare = parts[1].strip().strip("/")
-            if re.fullmatch(r"[A-Za-z0-9_-]+", bare):
-                page_slug = bare.lower()
+            # Bare slug or full URL without needing /title/ only once
+            bare = parts[1].strip()
+            # If it's a full URL, extract last path segment
+            url_m = re.search(r"https?://[^\s]+/title/([A-Za-z0-9][A-Za-z0-9_-]{0,500})", bare, re.I)
+            if url_m:
+                page_slug = url_m.group(1).lower().rstrip("/")
+            else:
+                bare = bare.strip("/").split("?")[0].split("#")[0]
+                # Allow very long slug names
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,500}", bare):
+                    page_slug = bare.lower()
 
         if not page_slug:
             suggestions = await catalog_page_suggestions("", limit=8)
@@ -2724,8 +2736,9 @@ def register_handlers(bot):
             return await message.reply(
                 "📌 **Usage**\n"
                 "• Reply to a `/title/...` page link with `/addgroups`\n"
-                "• Or: `/addgroups https://AniMoviesZoneflix-yt.vercel.app/title/slug`\n"
-                "• Or: `/addgroups slug-name`\n\n"
+                "• Or: `/addgroups https://yoursite.vercel.app/title/very-long-slug-name-here`\n"
+                "• Or: `/addgroups very-long-slug-name-here`\n\n"
+                "Long slug names are fully supported.\n\n"
                 f"**Recent pages:**\n{tip}"
             )
 
@@ -2744,18 +2757,28 @@ def register_handlers(bot):
             )
 
         page_slug = page.get("slug") or page_slug
+        # Telegram callback_data max 64 bytes — never put long slugs in it.
+        # Use a short token mapped to the full slug.
+        token = secrets.token_hex(4)
+        _addgroups_slug_tokens[token] = page_slug
+        # Prevent unbounded growth
+        if len(_addgroups_slug_tokens) > 500:
+            for k in list(_addgroups_slug_tokens.keys())[:200]:
+                _addgroups_slug_tokens.pop(k, None)
+
         kb = _kb([
             [
-                InlineKeyboardButton("📥 Download", callback_data=f"addg:dl:{page_slug}"),
-                InlineKeyboardButton("▶️ Watch", callback_data=f"addg:wt:{page_slug}"),
+                InlineKeyboardButton("📥 Download", callback_data=f"addg:dl:{token}"),
+                InlineKeyboardButton("▶️ Watch", callback_data=f"addg:wt:{token}"),
             ]
         ])
         title = page.get("title") or page_slug
         await message.reply(
             f"📁 **Add Groups** for **{html.escape(str(title))}**\n"
-            f"`/title/{page_slug}`\n\n"
+            f"`/title/{html.escape(page_slug)}`\n\n"
             f"Choose which section to configure:",
             reply_markup=kb,
+            parse_mode=ParseMode.HTML,
         )
 
     @bot.on_callback_query(filters.regex(r"^addg:(dl|wt):"))
@@ -2767,26 +2790,32 @@ def register_handlers(bot):
         if len(parts) < 3:
             return await callback.answer("Invalid data", show_alert=True)
         box = "download" if parts[1] == "dl" else "watch"
-        page_slug = parts[2]
+        token_or_slug = parts[2]
+        # Resolve short token → full slug (supports unlimited-length slugs)
+        page_slug = _addgroups_slug_tokens.get(token_or_slug) or token_or_slug
         page = await find_catalog_page(page_slug)
         if not page:
             return await callback.answer("Page not found in bot DB", show_alert=True)
         page_slug = page.get("slug") or page_slug
         _awaiting_addgroups[user.id] = {"page_slug": page_slug, "box": box}
+        # Escape for HTML; long names OK in message text (4096 limit)
+        safe_slug = html.escape(page_slug)
         try:
             await callback.message.edit_text(
-                f"✏️ **Configure {box.upper()} groups** for `{page_slug}`\n\n"
-                f"Send groups and buttons in this format (unlimited):\n\n"
-                f"`1. Group Name`\n"
-                f"`Button Name: https://example.com/link`\n\n"
-                f"`2. Another Group`\n"
-                f"`Stream: https://...`\n"
-                f"`Mirror: https://...`\n\n"
-                f"Send everything in **one message**. After saving, buttons appear in the {box} section of the page."
+                f"✏️ <b>Configure {box.upper()} groups</b> for <code>{safe_slug}</code>\n\n"
+                f"Send groups and buttons in this format (unlimited length):\n\n"
+                f"<code>1. Group Name</code>\n"
+                f"<code>Button Name: https://example.com/link</code>\n\n"
+                f"<code>2. Another Group</code>\n"
+                f"<code>Stream: https://...</code>\n"
+                f"<code>Mirror: https://...</code>\n\n"
+                f"Send everything in <b>one message</b>. After saving, buttons appear in the {box} section of the page.",
+                parse_mode=ParseMode.HTML,
             )
         except Exception:
             await callback.message.reply(
-                f"✏️ Send groups/buttons for **{box}** on `{page_slug}` using the format above."
+                f"✏️ Send groups/buttons for <b>{box}</b> on <code>{safe_slug}</code> using the format above.",
+                parse_mode=ParseMode.HTML,
             )
         await callback.answer()
 
