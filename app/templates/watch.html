@@ -178,24 +178,14 @@
   }
   .select:focus{border-color:var(--blue);box-shadow:var(--neon-blue)}
   .player-panel{display:none}.player-panel.active{display:block}
-  .player-grid{display:flex;flex-direction:column;gap:8px}
-  .pbtn, .player-item{
-    min-height:52px;border:1px solid var(--line);border-radius:12px;
+  .player-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
+  .pbtn{
+    min-height:46px;border:1px solid var(--line);border-radius:12px;
     background:linear-gradient(180deg,#14142c,#0e0e20);color:#fff;
-    display:flex;align-items:center;gap:12px;text-align:left;
-    padding:10px 12px;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .15s;font-size:13px;
-    text-decoration:none;
+    display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:10px;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .15s;font-size:13px;
   }
-  .pbtn:hover, .player-item:hover{border-color:var(--blue);box-shadow:var(--neon-blue);transform:translateX(3px)}
-  .player-item .player-icon{
-    width:40px;height:40px;border-radius:10px;overflow:hidden;flex-shrink:0;
-    background:#0a0a14;display:flex;align-items:center;justify-content:center;
-  }
-  .player-item .player-icon img{width:100%;height:100%;object-fit:cover}
-  .player-item .player-meta{flex:1;min-width:0}
-  .player-item .player-name{font-weight:700;font-size:13.5px;line-height:1.2}
-  .player-item .player-sub{font-size:11px;color:#9ca3af;margin-top:2px}
-  .player-item .player-chevron{flex-shrink:0;opacity:.55}
+  .pbtn:hover{border-color:var(--blue);box-shadow:var(--neon-blue);transform:translateY(-1px)}
   .copy-ok{font-size:12px;color:#69e69a;min-height:18px;margin-top:6px}
   .player-tabs{
     position:fixed;z-index:30;left:50%;bottom:max(12px,env(safe-area-inset-bottom));
@@ -248,19 +238,14 @@
   .btn.accent:hover{filter:brightness(1.08);box-shadow:0 0 14px rgba(59,130,246,.4)}
 </style>
 
-<!-- Official movi-player (https://github.com/mrujjwalg/movi-player · https://moviplayer.com)
-     Engine bootstrap matches DD Stream reference: WebGL2 gate, early WASM/module preload,
-     localStorage preference, ?engine= override. -->
+<!-- Official movi-player (https://github.com/mrujjwalg/movi-player · https://moviplayer.com) -->
 <script>
 (function () {
-  /* Engine bootstrap — runs before the body is parsed.
-     Picks the WASM (FFmpeg demux + WebCodecs) player when the device can
-     actually run it, and starts its module + WASM downloading early via
-     preload hints. Plyr is only fetched on the native fallback path.
-     Override with ?engine=wasm or ?engine=native.
-     Gate is WebGL2 only (canvas renderer). WebCodecs is the *fast* path;
-     engine ships a WASM software decoder so phones without VideoDecoder
-     still get the full player with audio/subtitle menus. */
+  /* Official builds:
+     - https://cdn.jsdelivr.net/npm/movi-player/dist/element.js          (ES module)
+     - https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js   (plain script)
+     - https://moviplayer.com/dist/element.js                            (hosted latest)
+     We use the global build so we can load it dynamically without type=module. */
   var CDN = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/';
   var OFFICIAL = 'https://cdn.jsdelivr.net/npm/movi-player/dist/';
   var params = new URLSearchParams(window.location.search);
@@ -277,7 +262,7 @@
   else engine = canWasm ? 'wasm' : 'native';
 
   try {
-    var pref = localStorage.getItem('AniMoviesZoneflix:engine') || localStorage.getItem('ddstream:engine');
+    var pref = localStorage.getItem('AniMoviesZoneflix:engine');
     if (!forced && (pref === 'wasm' || pref === 'native')) engine = pref;
   } catch (_) {}
 
@@ -290,9 +275,10 @@
     secure: secure,
     cdn: CDN,
     official: OFFICIAL,
+    /* Official global entry (no type=module required) */
     script: CDN + 'element.global.js',
     scriptFallback: OFFICIAL + 'element.global.js',
-    moduleScript: CDN + 'element.slim.js'
+    moduleScript: OFFICIAL + 'element.js'
   };
 
   if (engine === 'wasm') {
@@ -305,9 +291,7 @@
     addLink('preconnect', 'https://cdn.jsdelivr.net', { crossorigin: '' });
     addLink('dns-prefetch', 'https://cdn.jsdelivr.net');
     addLink('preconnect', 'https://moviplayer.com', { crossorigin: '' });
-    /* Match reference: modulepreload slim + preload WASM for faster first frame */
-    addLink('modulepreload', CDN + 'element.slim.js');
-    addLink('preload', CDN + 'movi.wasm', { as: 'fetch', type: 'application/wasm', crossorigin: 'anonymous' });
+    /* Preload official global + module so first play is faster */
     addLink('preload', CDN + 'element.global.js', { as: 'script' });
   }
 })();
@@ -340,7 +324,6 @@
             playsinline controls preload="auto" resume
             theme="dark" themecolor="#ff6a00"
             subtitleedge="outline"
-            smoothwarning nolinkwarning
             style="display:block"
             class="movi-bar-collapsed"
             tabindex="0"></movi-player>
@@ -348,15 +331,15 @@
           <div class="player-loading" id="playerLoading"><div class="spinner"></div></div>
           <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()">Buffering? Switch to basic player</button>
 
-          <!-- Top-left: switch qualities / sources in current group (symbol) -->
+          <!-- Top-left: switch qualities in current group -->
           <button type="button" class="player-chrome-btn pc-switch" id="pcSwitchBtn" title="Switch quality / source" aria-label="Switch source">
             <svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
           </button>
-          <!-- Laptop symbol: external players (MX / PLAYit / VLC / nPlayer) -->
+          <!-- Laptop: external players MX / PLAYit / VLC -->
           <button type="button" class="player-chrome-btn pc-laptop" id="pcLaptopBtn" title="Open in external player" aria-label="External players">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/><path d="M8 20v-2h8v2"/></svg>
           </button>
-          <!-- Download symbol -->
+          <!-- Download -->
           <button type="button" class="player-chrome-btn pc-download" id="pcDownloadBtn" title="Download" aria-label="Download">
             <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
           </button>
@@ -435,9 +418,9 @@
 
   <aside class="side">
     <div class="card">
-      <b>Open in external player</b>
+      <b>Open in player</b>
       <div id="mobile" class="player-panel active"><div class="player-grid" id="mobile-grid"></div></div>
-      <div class="notice">VLC · MX Player · PLAYit · nPlayer · Download. If a player does not open, use <b>Copy Download Link</b> or <b>Copy Stream URL</b>.</div>
+      <div class="notice">MX Player, PLAYit, VLC, and Download. If a player does not open, use <b>Copy Download Link</b> or <b>Copy Stream URL</b>.</div>
     </div>
   </aside>
 </div>
@@ -511,10 +494,7 @@ function showLoading() { if (loadingScreen) loadingScreen.classList.add('active'
 function hideLoading() { if (loadingScreen) loadingScreen.classList.remove('active'); loadingDone = true; }
 function setEngine(e) {
   engine = e;
-  try {
-    localStorage.setItem('ddstream:engine', e);
-    localStorage.setItem('AniMoviesZoneflix:engine', e);
-  } catch (_) {}
+  try { localStorage.setItem('ddstream:engine', e); } catch (_) {}
 }
 function activeMedia() {
   return (engine === 'wasm' && !browserMode) ? moviPlayer : nativePlayer;
@@ -566,58 +546,22 @@ function androidIntent(url, pkg, mime) {
   const scheme = u.protocol.replace(':','');
   return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${scheme};action=android.intent.action.VIEW;type=${mime || 'video/*'};package=${pkg};S.browser_fallback_url=${encodeURIComponent(url)};end`;
 }
-/* Icon-based external player cards (symbols match DD Stream reference) */
-const PLAYER_ICONS = {
-  vlc: 'https://i.ibb.co/px6fQs1/vlc.png',
-  mx: 'https://i.ibb.co/41WvtQ3/mx.png',
-  nplayer: 'https://i.ibb.co/Hd2dS4t/nPlayer.png',
-  playit: 'https://i.ibb.co/41WvtQ3/mx.png', /* fallback icon */
-  download: null
-};
-function addPlayerItem(gridId, opts) {
-  const { name, sub, href, icon, isDownload } = opts;
-  const a = document.createElement(isDownload ? 'a' : 'a');
-  a.className = 'player-item';
+function addPlayer(gridId, label, href) {
+  const a = document.createElement('a');
+  a.className = 'pbtn';
+  a.textContent = label;
   a.href = href;
   if (!href.startsWith('intent:')) { a.target = '_blank'; a.rel = 'noopener'; }
-  a.setAttribute('role', 'button');
-  a.tabIndex = 0;
-  const iconHtml = icon
-    ? `<div class="player-icon"><img src="${icon}" alt="${name}" loading="lazy"></div>`
-    : `<div class="player-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6a00" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>`;
-  a.innerHTML = `${iconHtml}<div class="player-meta"><div class="player-name">${name}</div><div class="player-sub">${sub || ''}</div></div><svg class="player-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`;
   const el = document.getElementById(gridId);
   if (el) el.appendChild(a);
 }
 function buildPlayerGrids() {
   const el = document.getElementById('mobile-grid');
   if (el) el.innerHTML = '';
-  addPlayerItem('mobile-grid', {
-    name: 'VLC', sub: 'Android only',
-    href: androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME),
-    icon: PLAYER_ICONS.vlc
-  });
-  addPlayerItem('mobile-grid', {
-    name: 'MX Player', sub: 'Android & iOS',
-    href: androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME),
-    icon: PLAYER_ICONS.mx
-  });
-  addPlayerItem('mobile-grid', {
-    name: 'PLAYit', sub: 'Android',
-    href: androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME),
-    icon: PLAYER_ICONS.playit
-  });
-  addPlayerItem('mobile-grid', {
-    name: 'nPlayer', sub: 'iOS & macOS',
-    href: STREAM_URL, /* nPlayer often uses direct / open-in-app */
-    icon: PLAYER_ICONS.nplayer
-  });
-  addPlayerItem('mobile-grid', {
-    name: 'Download', sub: 'Save file',
-    href: DL_URL,
-    icon: null,
-    isDownload: true
-  });
+  addPlayer('mobile-grid', 'MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME));
+  addPlayer('mobile-grid', 'PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME));
+  addPlayer('mobile-grid', 'VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME));
+  addPlayer('mobile-grid', 'Download', DL_URL);
 }
 buildPlayerGrids();
 
@@ -681,25 +625,22 @@ function goToGroupButton(groupIdx, buttonIdx) {
   });
 })();
 
-/* Laptop pop: VLC / MX / PLAYit / nPlayer (symbols + options like DD Stream) */
+/* Laptop pop: MX / PLAYit / VLC */
 (function setupLaptopPop() {
   const btn = document.getElementById('pcLaptopBtn');
   const pop = document.getElementById('laptopPop');
   const list = document.getElementById('laptopPopList');
   if (!btn || !pop || !list) return;
   const items = [
-    { name: 'VLC', sub: 'Android', href: androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME), icon: PLAYER_ICONS.vlc },
-    { name: 'MX Player', sub: 'Android & iOS', href: androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME), icon: PLAYER_ICONS.mx },
-    { name: 'PLAYit', sub: 'Android', href: androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME), icon: PLAYER_ICONS.playit },
-    { name: 'nPlayer', sub: 'iOS & macOS', href: STREAM_URL, icon: PLAYER_ICONS.nplayer },
+    ['MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME)],
+    ['PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME)],
+    ['VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME)],
   ];
   list.innerHTML = '';
-  items.forEach((it) => {
+  items.forEach(([label, href]) => {
     const a = document.createElement('a');
-    a.href = it.href;
-    if (!it.href.startsWith('intent:')) { a.target = '_blank'; a.rel = 'noopener'; }
-    a.innerHTML = (it.icon ? `<img src="${it.icon}" alt="" width="22" height="22" style="border-radius:5px;vertical-align:middle;margin-right:8px">` : '') + it.name;
-    a.title = it.sub || it.name;
+    a.href = href;
+    a.textContent = label;
     list.appendChild(a);
   });
   btn.addEventListener('click', (e) => {

@@ -3,7 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { MongoClient } from 'mongodb';
 
-export const config = { api: { bodyParser: false } };
+export const config = { api: { bodyParser: false }, maxDuration: 300 };
 
 const API_SUBPATHS = new Set([
   'catalog',
@@ -2050,7 +2050,30 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   const posterUrl = String(extra.posterUrl || '');
   const groupName = (watchGroups[groupIndex] && watchGroups[groupIndex].name) || '';
 
-  const headExtra = `<style>
+  const headExtra = `
+<script>
+(function () {
+  var CDN = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/';
+  var params = new URLSearchParams(window.location.search);
+  var forced = params.get('engine');
+  var canWasm = false;
+  try { canWasm = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { canWasm = false; }
+  var engine = (forced === 'wasm' || forced === 'native') ? forced : (canWasm ? 'wasm' : 'native');
+  window.__AniMoviesZoneflixPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
+  function addLink(rel, href, attrs) {
+    var l = document.createElement('link');
+    l.rel = rel; l.href = href;
+    if (attrs) Object.keys(attrs).forEach(function (k) { l.setAttribute(k, attrs[k]); });
+    document.head.appendChild(l);
+  }
+  addLink('preconnect', 'https://cdn.jsdelivr.net', { crossorigin: '' });
+  if (engine === 'wasm') {
+    addLink('modulepreload', CDN + 'element.slim.js');
+    addLink('preload', CDN + 'movi.wasm', { as: 'fetch', crossorigin: 'anonymous' });
+  }
+})();
+</script>
+<style>
     ${!settings.built_in_player_enabled ? '.player-shell,.card.info{display:none!important}' : ''}
     ${!settings.streaming_enabled ? '.player-shell{display:none!important}' : ''}
     .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(255,106,0,.18)}
@@ -2126,8 +2149,9 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
             playsinline controls preload="auto" resume
             theme="dark" themecolor="#ff6a00"
             subtitleedge="outline"
-            style="display:block;width:100%;height:100%"
+            style="display:none;width:100%;height:100%"
             tabindex="0"></movi-player>
+          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()">Buffering? Switch to basic player</button>
           <video id="player" controls playsinline preload="auto" style="display:none;width:100%;height:100%;object-fit:contain;background:#000"></video>
           <div id="playerLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2">
             <div style="width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#ff6a00;animation:ddspin .8s linear infinite"></div>
@@ -2186,12 +2210,17 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
 <script>
 const SHORT_CODE = ${safeJsonForScript(file.short_code)};
 const STREAM_ORIGIN = (${safeJsonForScript(cfOrigin)} || window.location.origin).replace(/\\/+$/, '');
-const STREAM_URL = STREAM_ORIGIN + '/stream/' + SHORT_CODE;
+// Same-origin play path (DDStream style) so movi-player WASM can demux multi-audio MKV.
+// Vercel proxies /stream|/dl|/remux to the backend tunnel.
+const PLAY_ORIGIN = window.location.origin;
+const STREAM_URL = PLAY_ORIGIN + '/stream/' + SHORT_CODE;
+const BACKEND_STREAM_URL = STREAM_ORIGIN + '/stream/' + SHORT_CODE;
 const DOWNLOADS_ENABLED = ${safeJsonForScript(downloadsEnabled)};
 const FILESTORE_BOT = ${safeJsonForScript(fsUser)};
 const DL_URL = DOWNLOADS_ENABLED
-  ? (STREAM_ORIGIN + '/dl/' + SHORT_CODE)
-  : (FILESTORE_BOT ? ('https://t.me/' + FILESTORE_BOT + '?start=file_' + SHORT_CODE) : (STREAM_ORIGIN + '/dl/' + SHORT_CODE));
+  ? (PLAY_ORIGIN + '/dl/' + SHORT_CODE)
+  : (FILESTORE_BOT ? ('https://t.me/' + FILESTORE_BOT + '?start=file_' + SHORT_CODE) : (PLAY_ORIGIN + '/dl/' + SHORT_CODE));
+const EXTERNAL_STREAM_URL = BACKEND_STREAM_URL;
 const PLAYER_MIME = ${safeJsonForScript(file.mime_type || 'video/mp4')};
 const INTENT_MIME = (!PLAYER_MIME || PLAYER_MIME === 'application/octet-stream') ? 'video/*' : PLAYER_MIME;
 const WATCH_GROUPS = ${safeJsonForScript(watchGroups)};
@@ -2202,112 +2231,141 @@ const POSTER_URL = ${safeJsonForScript(posterUrl)};
 const FILESTORE_USER = ${safeJsonForScript(fsUser)};
 const FILE_NAME = ${safeJsonForScript(file.filename || '')};
 
-// Browser cannot play most MKV/AVI in native <video>. Prefer remux (mp4) for those.
-const mimeLower = String(PLAYER_MIME || '').toLowerCase();
-const nameLower = String(FILE_NAME || '').toLowerCase();
-const needsRemux = /matroska|x-matroska|\.mkv\b|video\/avi|video\/x-msvideo|\.avi\b|video\/x-ms-wmv|\.wmv\b/.test(mimeLower + ' ' + nameLower);
-const REMUX_URL = STREAM_ORIGIN + '/remux/' + SHORT_CODE;
-// PLAY_URL: remux for incompatible containers; raw stream otherwise
-let PLAY_URL = needsRemux ? REMUX_URL : STREAM_URL;
-// External players still get the original stream/download URL
-const EXTERNAL_STREAM = STREAM_URL;
+const FILE_URL = STREAM_URL;
+const REMUX_URL = PLAY_ORIGIN + '/remux/' + SHORT_CODE;
+const CFG = window.__AniMoviesZoneflixPlayer || {};
+const MODULE_URL = (CFG.cdn || 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/') + 'element.slim.js';
+const MOVI_GLOBAL = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js';
+const MOVI_GLOBAL_FALLBACK = 'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js';
 
-const player = document.getElementById('player');
 const moviPlayer = document.getElementById('moviPlayer');
+const nativePlayer = document.getElementById('player') || document.getElementById('nativePlayer');
 const loadingEl = document.getElementById('playerLoading');
-function hideLoading(){ if (loadingEl) loadingEl.style.display = 'none'; }
-function showLoading(){ if (loadingEl) loadingEl.style.display = 'flex'; }
+const nativeSwitch = document.getElementById('nativeSwitch');
 
-function loadScript(src) {
+let engine = CFG.engine || 'native';
+const forcedEngine = !!CFG.forced;
+let wasmLoading = false, wasmLoaded = false, wasmWired = false;
+let nativeLoaded = false, browserMode = false;
+
+function hideLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.remove('active'); loadingEl.style.display = 'none'; } }
+function showLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.add('active'); loadingEl.style.display = 'flex'; } }
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  const m = document.getElementById('toast-message');
+  if (m) m.textContent = msg || 'OK';
+  if (t) { t.classList.add('active'); setTimeout(() => t.classList.remove('active'), 2200); }
+}
+
+function warmMedia(url) {
+  try { fetch(url, { headers: { Range: 'bytes=0-65535' }, priority: 'low' }).then(r => r.arrayBuffer()).catch(() => {}); } catch (_) {}
+}
+
+function initNative(reason) {
+  engine = 'native';
+  if (moviPlayer) moviPlayer.style.display = 'none';
+  if (nativePlayer) {
+    nativePlayer.style.display = 'block';
+    try { nativePlayer.removeAttribute('crossorigin'); } catch (_) {}
+    if (!nativeLoaded) {
+      nativeLoaded = true;
+      nativePlayer.src = FILE_URL;
+      try { nativePlayer.load(); } catch (_) {}
+      try { const p = nativePlayer.play(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+      nativePlayer.addEventListener('error', () => {
+        if (nativePlayer.src.indexOf('/remux/') === -1) {
+          nativePlayer.src = REMUX_URL;
+          try { nativePlayer.load(); } catch (_) {}
+        } else {
+          hideLoading();
+          showToast('Cannot play here — use Download or external player');
+        }
+      }, { once: true });
+    }
+  }
+  nativePlayer && nativePlayer.addEventListener('playing', hideLoading, { once: true });
+  nativePlayer && nativePlayer.addEventListener('canplay', hideLoading, { once: true });
+  if (reason) console.debug('[player] native:', reason);
+  setTimeout(hideLoading, 12000);
+}
+
+function startWasm() {
+  if (!wasmWired && moviPlayer) {
+    wasmWired = true;
+    moviPlayer.addEventListener('playing', hideLoading);
+    moviPlayer.addEventListener('canplay', hideLoading);
+    moviPlayer.addEventListener('error', () => { if (!forcedEngine) initNative('wasm-error'); });
+    moviPlayer.addEventListener('nativefallback', () => { if (!forcedEngine) initNative('nativefallback'); });
+  }
+  if (moviPlayer) {
+    moviPlayer.style.display = 'block';
+    if (nativePlayer) nativePlayer.style.display = 'none';
+    if (!wasmLoaded) {
+      wasmLoaded = true;
+      moviPlayer.src = FILE_URL;
+      try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
+    }
+  }
+  setTimeout(hideLoading, 15000);
+}
+
+function loadGlobalScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
+    s.src = src; s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('load fail ' + src));
+    s.onerror = () => reject(new Error('fail'));
     document.head.appendChild(s);
   });
 }
 
-async function initMoviPlayer(url) {
-  const cdns = [
-    'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js',
-    'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js',
-  ];
-  let loaded = false;
-  for (const src of cdns) {
-    try {
-      await loadScript(src);
-      loaded = true;
-      break;
-    } catch (_) {}
-  }
-  if (!loaded || !window.customElements) {
-    throw new Error('movi-player unavailable');
-  }
-  try {
-    await Promise.race([
-      customElements.whenDefined('movi-player'),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
-    ]);
-  } catch (_) {
-    if (!customElements.get('movi-player')) throw new Error('movi-player unavailable');
-  }
-  if (moviPlayer) {
-    moviPlayer.style.display = 'block';
-    if (player) player.style.display = 'none';
-    moviPlayer.src = url;
-    try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
-    const done = () => hideLoading();
-    moviPlayer.addEventListener('playing', done, { once: true });
-    moviPlayer.addEventListener('loadeddata', done, { once: true });
-    moviPlayer.addEventListener('error', () => {
-      // Fallback to native remux (mp4) if enhanced player cannot decode
-      console.warn('movi-player error, falling back to remux');
-      initNativePlayer(REMUX_URL);
-    }, { once: true });
-    setTimeout(done, 10000);
-  }
-}
+function initWasm() {
+  if (wasmLoading) return;
+  wasmLoading = true;
+  const timer = setTimeout(() => {
+    if (!forcedEngine) initNative('module-timeout');
+    else { hideLoading(); showToast('Player timed out'); }
+  }, 45000);
 
-function initNativePlayer(url) {
-  if (!player) return;
-  if (moviPlayer) moviPlayer.style.display = 'none';
-  player.style.display = 'block';
-  // Avoid crossorigin for simpler playback across ngrok when possible
-  try { player.removeAttribute('crossorigin'); } catch (_) {}
-  player.src = url;
-  try { player.load(); } catch (_) {}
-  const done = () => hideLoading();
-  player.addEventListener('playing', done, { once: true });
-  player.addEventListener('loadeddata', done, { once: true });
-  player.addEventListener('error', () => {
-    // If stream fails and we were not on remux, try remux once
-    if (url !== REMUX_URL) {
-      showLoading();
-      player.src = REMUX_URL;
-      try { player.load(); } catch (_) {}
-    } else {
-      hideLoading();
+  import(MODULE_URL).then(() => {
+    clearTimeout(timer);
+    wasmLoading = false;
+    if (!customElements.get('movi-player')) {
+      if (!forcedEngine) initNative('element-missing');
+      return;
     }
-  }, { once: true });
-  setTimeout(done, 10000);
-  try {
-    const p = player.play();
-    if (p && p.catch) p.catch(() => {});
-  } catch (_) {}
+    startWasm();
+  }).catch(() => {
+    return loadGlobalScript(MOVI_GLOBAL).catch(() => loadGlobalScript(MOVI_GLOBAL_FALLBACK)).then(async () => {
+      clearTimeout(timer);
+      wasmLoading = false;
+      try { await customElements.whenDefined('movi-player'); } catch (_) {}
+      if (!customElements.get('movi-player')) {
+        if (!forcedEngine) initNative('element-missing');
+        return;
+      }
+      startWasm();
+    });
+  }).catch(() => {
+    clearTimeout(timer);
+    wasmLoading = false;
+    if (!forcedEngine) initNative('module-load-failed');
+    else { hideLoading(); showToast('Could not load player'); }
+  });
 }
 
-(async function bootPlayer() {
-  showLoading();
-  // Always use movi-player first (same as full watch.html), STREAM_URL for multi-audio/MKV
-  try {
-    await initMoviPlayer(STREAM_URL);
-  } catch (e) {
-    console.warn('Enhanced player failed, using native/remux', e);
-    initNativePlayer(PLAY_URL);
-  }
-})();
+function switchEngine() {
+  if (engine !== 'wasm' || browserMode) return;
+  try { moviPlayer.pause(); } catch (e) {}
+  initNative('user-switch');
+  showToast('Basic player');
+}
+
+// Boot like DDStream: wasm first when WebGL2 available
+showLoading();
+if (engine === 'wasm') { warmMedia(FILE_URL); initWasm(); }
+else initNative(forcedEngine ? 'forced-native' : 'no-webgl2');
+setTimeout(() => { if (engine === 'wasm' && nativeSwitch) nativeSwitch.hidden = false; }, 12000);
 
 const dlBtn = document.getElementById('direct-dl-btn');
 if (dlBtn) dlBtn.href = DL_URL;
@@ -2325,9 +2383,9 @@ function addPlayer(gridId, label, href) {
   if (!href.startsWith('intent:')) { a.target = '_blank'; a.rel = 'noopener'; }
   document.getElementById(gridId)?.appendChild(a);
 }
-addPlayer('mobile-grid', 'MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME));
-addPlayer('mobile-grid', 'PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME));
-addPlayer('mobile-grid', 'VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME));
+addPlayer('mobile-grid', 'MX Player', androidIntent(EXTERNAL_STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME));
+addPlayer('mobile-grid', 'PLAYit', androidIntent(EXTERNAL_STREAM_URL, 'com.playit.videoplayer', INTENT_MIME));
+addPlayer('mobile-grid', 'VLC', androidIntent(EXTERNAL_STREAM_URL, 'org.videolan.vlc', INTENT_MIME));
 addPlayer('mobile-grid', 'Download', DL_URL);
 
 function extractWatchCode(url) {
@@ -2384,9 +2442,9 @@ function goToGroupButton(groupIdx, buttonIdx) {
   const list = document.getElementById('laptopPopList');
   if (!btn || !pop || !list) return;
   const items = [
-    ['MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME)],
-    ['PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME)],
-    ['VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME)],
+    ['MX Player', androidIntent(EXTERNAL_STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME)],
+    ['PLAYit', androidIntent(EXTERNAL_STREAM_URL, 'com.playit.videoplayer', INTENT_MIME)],
+    ['VLC', androidIntent(EXTERNAL_STREAM_URL, 'org.videolan.vlc', INTENT_MIME)],
   ];
   list.innerHTML = '';
   items.forEach(([label, href]) => {
@@ -3493,6 +3551,19 @@ export default async function handler(req, res) {
       return;
     }
 
+    // Media proxy: same-origin /stream|/dl|/remux for movi-player multi-audio (DDStream pattern)
+    const isMediaProxy = /^\/(stream|dl|remux)\//.test(pathname);
+    if (req.method === 'OPTIONS' && isMediaProxy) {
+      res.statusCode = 204;
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept, Origin, ngrok-skip-browser-warning');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.end();
+      return;
+    }
+
     if (!cloudflareUrl || isVercelUrl(cloudflareUrl)) {
       sendJson(res, 404, { error: 'Not found', path: pathname });
       return;
@@ -3506,18 +3577,30 @@ export default async function handler(req, res) {
       host: targetUrl.host,
       'x-forwarded-host': req.headers.host || '',
       'x-forwarded-proto': 'https',
+      // Skip ngrok free browser interstitial for media fetches
+      'ngrok-skip-browser-warning': '1',
     };
     if (req.headers.authorization) headers.authorization = req.headers.authorization;
     if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
     if (req.headers.range) headers.range = req.headers.range;
 
+    // Long timeout for media; streaming can take a while
+    const mediaTimeout = isMediaProxy ? 0 : 25000;
+
     const clientReq = transport.request(targetUrl, { method: req.method, headers }, (backendRes) => {
       const responseHeaders = { ...backendRes.headers };
       responseHeaders['cache-control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+      responseHeaders['access-control-allow-origin'] = '*';
+      responseHeaders['access-control-expose-headers'] = 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type';
+      responseHeaders['access-control-allow-methods'] = 'GET, HEAD, OPTIONS';
+      // Avoid compressed body issues with range streaming
+      delete responseHeaders['content-encoding'];
       res.writeHead(backendRes.statusCode || 502, responseHeaders);
       backendRes.pipe(res);
     });
-    clientReq.setTimeout(25000, () => clientReq.destroy(new Error('Backend request timed out')));
+    if (mediaTimeout > 0) {
+      clientReq.setTimeout(mediaTimeout, () => clientReq.destroy(new Error('Backend request timed out')));
+    }
     clientReq.on('error', (error) => {
       if (!res.headersSent) {
         sendJson(res, 502, {
