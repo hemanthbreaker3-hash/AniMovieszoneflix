@@ -704,7 +704,7 @@ document.addEventListener('click', () => {
   const grid = document.getElementById('relatedGrid');
   const pager = document.getElementById('relatedPager');
   if (!grid || !WATCH_GROUPS.length) return;
-  const PER = 8;
+  const PER = 12;
   let page = 1;
   const max = Math.max(1, Math.ceil(WATCH_GROUPS.length / PER));
   function render() {

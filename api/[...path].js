@@ -2055,8 +2055,10 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     ${!settings.streaming_enabled ? '.player-shell{display:none!important}' : ''}
     .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(255,106,0,.18)}
     .player-box{background:#000;border-radius:18px;overflow:hidden;position:relative;z-index:1}
-    .player-wrapper{width:100%;aspect-ratio:16/9;position:relative;background:#000}
-    .player-wrapper video{width:100%;height:100%;background:#000;object-fit:contain;display:block}
+    .player-wrapper{width:100%;aspect-ratio:16/9;position:relative;background:#000;contain:paint}
+    .player-wrapper video,
+    .player-wrapper movi-player{width:100%;height:100%;background:#000;object-fit:contain;display:block}
+    movi-player{--movi-primary:#ff6a00;--movi-primary-light:#ff9b42;--movi-accent:#ffb36f;--movi-brand-fill:linear-gradient(135deg,#ff6a00,#ffb36f);--movi-glass-bg:rgba(10,10,20,.88);--movi-chrome-bg:rgba(10,10,20,.88);--movi-bar-bg:rgba(10,10,20,.88);--movi-chrome-fg:#f5f5f5;--movi-surface:#12122a}
     .player-chrome-btn{position:absolute;z-index:9;width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(6,6,12,.82);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(8px);padding:0;line-height:0}
     .player-chrome-btn:hover{background:rgba(255,106,0,.25);border-color:rgba(255,106,0,.55)}
     .player-chrome-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -2120,10 +2122,17 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     <div class="player-shell">
       <div class="player-box">
         <div class="player-wrapper" id="playerWrapper">
-          <video id="player" controls playsinline preload="auto" crossorigin="anonymous">
-            <source id="video-source" src="" type="video/mp4">
-            Your browser cannot play this media.
-          </video>
+          <movi-player id="moviPlayer"
+            playsinline controls preload="auto" resume
+            theme="dark" themecolor="#ff6a00"
+            subtitleedge="outline"
+            style="display:block;width:100%;height:100%"
+            tabindex="0"></movi-player>
+          <video id="player" controls playsinline preload="auto" style="display:none;width:100%;height:100%;object-fit:contain;background:#000"></video>
+          <div id="playerLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2">
+            <div style="width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#ff6a00;animation:ddspin .8s linear infinite"></div>
+          </div>
+          <style>@keyframes ddspin{to{transform:rotate(360deg)}} movi-player{width:100%;height:100%;--movi-primary:#ff6a00}</style>
           <button type="button" class="player-chrome-btn pc-switch" id="pcSwitchBtn" title="Switch quality / source" aria-label="Switch source">
             <svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
           </button>
@@ -2191,12 +2200,115 @@ const GROUP_INDEX = ${safeJsonForScript(groupIndex)};
 const BUTTON_INDEX = ${safeJsonForScript(buttonIndex)};
 const POSTER_URL = ${safeJsonForScript(posterUrl)};
 const FILESTORE_USER = ${safeJsonForScript(fsUser)};
+const FILE_NAME = ${safeJsonForScript(file.filename || '')};
+
+// Browser cannot play most MKV/AVI in native <video>. Prefer remux (mp4) for those.
+const mimeLower = String(PLAYER_MIME || '').toLowerCase();
+const nameLower = String(FILE_NAME || '').toLowerCase();
+const needsRemux = /matroska|x-matroska|\.mkv\b|video\/avi|video\/x-msvideo|\.avi\b|video\/x-ms-wmv|\.wmv\b/.test(mimeLower + ' ' + nameLower);
+const REMUX_URL = STREAM_ORIGIN + '/remux/' + SHORT_CODE;
+// PLAY_URL: remux for incompatible containers; raw stream otherwise
+let PLAY_URL = needsRemux ? REMUX_URL : STREAM_URL;
+// External players still get the original stream/download URL
+const EXTERNAL_STREAM = STREAM_URL;
 
 const player = document.getElementById('player');
-if (player) {
-  player.src = STREAM_URL;
-  player.load();
+const moviPlayer = document.getElementById('moviPlayer');
+const loadingEl = document.getElementById('playerLoading');
+function hideLoading(){ if (loadingEl) loadingEl.style.display = 'none'; }
+function showLoading(){ if (loadingEl) loadingEl.style.display = 'flex'; }
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('load fail ' + src));
+    document.head.appendChild(s);
+  });
 }
+
+async function initMoviPlayer(url) {
+  const cdns = [
+    'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js',
+    'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js',
+  ];
+  let loaded = false;
+  for (const src of cdns) {
+    try {
+      await loadScript(src);
+      loaded = true;
+      break;
+    } catch (_) {}
+  }
+  if (!loaded || !window.customElements) {
+    throw new Error('movi-player unavailable');
+  }
+  try {
+    await Promise.race([
+      customElements.whenDefined('movi-player'),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+    ]);
+  } catch (_) {
+    if (!customElements.get('movi-player')) throw new Error('movi-player unavailable');
+  }
+  if (moviPlayer) {
+    moviPlayer.style.display = 'block';
+    if (player) player.style.display = 'none';
+    moviPlayer.src = url;
+    try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
+    const done = () => hideLoading();
+    moviPlayer.addEventListener('playing', done, { once: true });
+    moviPlayer.addEventListener('loadeddata', done, { once: true });
+    moviPlayer.addEventListener('error', () => {
+      // Fallback to native remux (mp4) if enhanced player cannot decode
+      console.warn('movi-player error, falling back to remux');
+      initNativePlayer(REMUX_URL);
+    }, { once: true });
+    setTimeout(done, 10000);
+  }
+}
+
+function initNativePlayer(url) {
+  if (!player) return;
+  if (moviPlayer) moviPlayer.style.display = 'none';
+  player.style.display = 'block';
+  // Avoid crossorigin for simpler playback across ngrok when possible
+  try { player.removeAttribute('crossorigin'); } catch (_) {}
+  player.src = url;
+  try { player.load(); } catch (_) {}
+  const done = () => hideLoading();
+  player.addEventListener('playing', done, { once: true });
+  player.addEventListener('loadeddata', done, { once: true });
+  player.addEventListener('error', () => {
+    // If stream fails and we were not on remux, try remux once
+    if (url !== REMUX_URL) {
+      showLoading();
+      player.src = REMUX_URL;
+      try { player.load(); } catch (_) {}
+    } else {
+      hideLoading();
+    }
+  }, { once: true });
+  setTimeout(done, 10000);
+  try {
+    const p = player.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) {}
+}
+
+(async function bootPlayer() {
+  showLoading();
+  // Always use movi-player first (same as full watch.html), STREAM_URL for multi-audio/MKV
+  try {
+    await initMoviPlayer(STREAM_URL);
+  } catch (e) {
+    console.warn('Enhanced player failed, using native/remux', e);
+    initNativePlayer(PLAY_URL);
+  }
+})();
+
 const dlBtn = document.getElementById('direct-dl-btn');
 if (dlBtn) dlBtn.href = DL_URL;
 
@@ -2331,7 +2443,7 @@ document.addEventListener('click', () => {
   const grid = document.getElementById('relatedGrid');
   const pager = document.getElementById('relatedPager');
   if (!grid || !WATCH_GROUPS.length) return;
-  const PER = 8;
+  const PER = 12;
   let page = Math.floor(GROUP_INDEX / PER) + 1;
   const max = Math.max(1, Math.ceil(WATCH_GROUPS.length / PER));
   function render() {
