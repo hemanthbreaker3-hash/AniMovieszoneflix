@@ -3452,21 +3452,77 @@ export default async function handler(req, res) {
     }
 
     const requestPath = pathname + search;
+
+    // Same-origin media proxy (do NOT 307 to ngrok — browser hits interstitial HTML and movi-player fails).
+    // URL structure stays /stream|/dl|/remux|/api/tracks — body is proxied from backend with skip header.
     if (
       pathname.startsWith('/stream/') ||
       pathname.startsWith('/dl/') ||
       pathname.startsWith('/remux/') ||
       pathname.startsWith('/api/tracks/')
     ) {
-      if (!cloudflareUrl) {
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept, Origin, ngrok-skip-browser-warning');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        res.end();
+        return;
+      }
+      if (!cloudflareUrl || isVercelUrl(cloudflareUrl)) {
         sendJson(res, 503, {
           error: 'ngrok tunnel URL is not configured yet',
           message: 'Wait a few seconds for the VPS ngrok tunnel to auto-sync to MongoDB, or set it via /baseurl.',
         });
         return;
       }
-      res.writeHead(307, { Location: `${cloudflareUrl}${requestPath}` });
-      res.end();
+      const targetUrl = new URL(`${cloudflareUrl}${requestPath}`);
+      const transport = targetUrl.protocol === 'https:' ? https : http;
+      const headers = {
+        accept: req.headers.accept || '*/*',
+        'user-agent': req.headers['user-agent'] || 'AniMoviesZoneflix-Vercel-Gateway',
+        host: targetUrl.host,
+        'x-forwarded-host': req.headers.host || '',
+        'x-forwarded-proto': 'https',
+        'ngrok-skip-browser-warning': '1',
+      };
+      if (req.headers.range) headers.range = req.headers.range;
+      if (req.headers['if-range']) headers['if-range'] = req.headers['if-range'];
+      if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+
+      const clientReq = transport.request(targetUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers }, (backendRes) => {
+        const responseHeaders = { ...backendRes.headers };
+        // Normalize CORS for browser / movi-player
+        responseHeaders['access-control-allow-origin'] = '*';
+        responseHeaders['access-control-expose-headers'] = 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type';
+        responseHeaders['access-control-allow-methods'] = 'GET, HEAD, OPTIONS';
+        responseHeaders['cache-control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+        delete responseHeaders['content-encoding'];
+        delete responseHeaders['transfer-encoding'];
+        // Avoid redirect loops if backend somehow redirects
+        delete responseHeaders['location'];
+        res.writeHead(backendRes.statusCode || 502, responseHeaders);
+        if (req.method === 'HEAD') {
+          res.end();
+          backendRes.resume();
+          return;
+        }
+        backendRes.pipe(res);
+      });
+      clientReq.on('error', (error) => {
+        if (!res.headersSent) {
+          sendJson(res, 502, {
+            error: 'Bad Gateway',
+            message: 'Could not connect to media backend.',
+            detail: String(error?.message || error),
+          });
+        } else {
+          res.destroy(error);
+        }
+      });
+      clientReq.end();
       return;
     }
 
