@@ -3301,10 +3301,19 @@ export default async function handler(req, res) {
     }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/watch/')) {
-      // Keep query string separate from short code (e.g. /watch/CODE?title=slug&g=0&b=0)
+      // Pathname from getRequestPath has no query; short code only.
+      // Button URLs from the bot are already full /watch/<code> links — we only need the code.
       let shortCodeRaw = pathname.slice('/watch/'.length);
       if (shortCodeRaw.includes('/')) shortCodeRaw = shortCodeRaw.split('/')[0];
-      const shortCode = decodeURIComponent(shortCodeRaw);
+      // Strip accidental query fragments if any proxy left them on path
+      shortCodeRaw = shortCodeRaw.split('?')[0].split('#')[0];
+      let shortCode = '';
+      try { shortCode = decodeURIComponent(shortCodeRaw); } catch { shortCode = shortCodeRaw; }
+      shortCode = String(shortCode || '').trim();
+      if (!shortCode) {
+        sendJson(res, 404, { detail: 'Link not found' });
+        return;
+      }
       const fileData = await db.collection('files').findOne({ short_code: shortCode });
       if (!fileData) {
         sendJson(res, 404, { detail: 'Link not found' });
@@ -3312,9 +3321,10 @@ export default async function handler(req, res) {
       }
 
       // Title context for prev/next, switch, related groups (works on Vercel website)
-      const titleSlug = String(url.searchParams.get('title') || '').trim();
-      let groupIndex = parseInt(url.searchParams.get('g') || '0', 10);
-      let buttonIndex = parseInt(url.searchParams.get('b') || '0', 10);
+      // Use searchParams from getRequestPath — NOT a missing `url` variable.
+      const titleSlug = String(searchParams.get('title') || '').trim();
+      let groupIndex = parseInt(searchParams.get('g') || '0', 10);
+      let buttonIndex = parseInt(searchParams.get('b') || '0', 10);
       if (!Number.isFinite(groupIndex) || groupIndex < 0) groupIndex = 0;
       if (!Number.isFinite(buttonIndex) || buttonIndex < 0) buttonIndex = 0;
 
