@@ -23,7 +23,7 @@ from app.shorteners import (
     gate_request, verify_key, config as shortener_config, create_shortlink,
     get_key_page, is_protected_title_target,
 )
-from app.utils.cloudflare_tunnel import (
+from app.utils.ngrok_tunnel import (
     apply_auto_cloudflare_url,
     start_cloudflare_auto_tunnel,
     stop_cloudflare_auto_tunnel,
@@ -60,28 +60,47 @@ async def lifespan(app: FastAPI):
         session_manager.prepare_bot()
         register_handlers(session_manager.bot_client)
         await session_manager.start()
-        from app.bot.main import setup_bot_commands
+        from app.bot.main import setup_bot_commands, start_filestore_client, stop_filestore_client, refresh_runtime_admin_cache
         await setup_bot_commands(session_manager.bot_client)
+        try:
+            await refresh_runtime_admin_cache()
+        except Exception as e:
+            logger.warning("Admin cache refresh failed: %s", e)
+        # Restore FileStore secondary bot if a token was previously saved
+        try:
+            runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+            fs_token = (runtime.get("filestore_bot_token") or "").strip()
+            fs_user = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
+            if fs_token:
+                info = await start_filestore_client(fs_token, username=fs_user or None)
+                logger.info("FileStore restore: %s", info)
+        except Exception as e:
+            logger.warning("Could not restore FileStore secondary bot: %s", e)
         if getattr(settings, "BASE_URL", None):
             os.environ["BASE_URL"] = str(settings.BASE_URL).rstrip("/")
-        logger.info("HITLER service started (wzgram)")
+        logger.info("AniMoviesZoneflix service started (wzgram)")
         yield
     finally:
+        try:
+            from app.bot.main import stop_filestore_client
+            await stop_filestore_client()
+        except Exception:
+            pass
         await stop_cloudflare_auto_tunnel()
         await session_manager.stop()
         mongo_client.close()
-        logger.info("HITLER service stopped")
+        logger.info("AniMoviesZoneflix service stopped")
 
 
-app = FastAPI(title="HITLER Media Link Service", lifespan=lifespan)
+app = FastAPI(title="AniMoviesZoneflix Media & Anime Service", lifespan=lifespan)
 
 
 @app.middleware("http")
 async def auto_cloudflare_and_vercel_routing_middleware(request: Request, call_next):
     """
-    1. Automatically detect any incoming *.trycloudflare.com Host header, save it to MongoDB,
-       and replace all catalog button URL domains with that Cloudflare try URL.
-    2. If a user accesses website-only catalog pages (/, /search, /title/*) on a trycloudflare.com
+    1. Automatically detect any incoming *.ngrok-free.app Host header, save it to MongoDB,
+       and replace all catalog button URL domains with that ngrok public URL.
+    2. If a user accesses website-only catalog pages (/, /search, /title/*) on a ngrok-free.app
        hostname and a Vercel website URL is registered, redirect them to the Vercel website.
     """
     raw_host = (
@@ -194,7 +213,7 @@ async def health():
     vercel_url = await get_active_vercel_website_url()
     return {
         "status": "ok" if mongo_status == "ok" else "degraded",
-        "service": "HITLER",
+        "service": "AniMoviesZoneflix",
         "database": mongo_status,
         "telegram_sessions": sessions,
         "download_ready": mongo_status == "ok" and sessions > 0,
@@ -262,6 +281,13 @@ async def stream_file(request: Request, short_code: str, extra_name: str = ""):
     """
     runtime = await get_settings()
     if request.url.path.startswith("/dl/") and runtime.get("downloads_enabled") is False:
+        fs = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
+        if fs:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url=f"https://t.me/{fs}?start=file_{short_code}",
+                status_code=302,
+            )
         raise HTTPException(status_code=403, detail="Downloads are currently disabled")
     if request.url.path.startswith("/stream/") and runtime.get("streaming_enabled") is False:
         raise HTTPException(status_code=403, detail="Streaming is currently disabled")

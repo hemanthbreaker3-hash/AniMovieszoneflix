@@ -8,14 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg mediainfo ca-certificates curl && \
-    ARCH="$(dpkg --print-architecture)" && \
-    case "$ARCH" in \
-      amd64) CF_ARCH="amd64" ;; \
-      arm64) CF_ARCH="arm64" ;; \
-      *) CF_ARCH="amd64" ;; \
-    esac && \
-    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" -o /usr/local/bin/cloudflared && \
-    chmod +x /usr/local/bin/cloudflared && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt

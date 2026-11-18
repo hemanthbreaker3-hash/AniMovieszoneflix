@@ -131,78 +131,45 @@ def _valid_public_candidate(value: str | None) -> str | None:
 
 async def get_active_cloudflare_url() -> str | None:
     """
-    Resolve the public origin used for download (/dl/), stream/watch (/watch/, /stream/, /remux/),
-    and catalog button URLs.
-
-    Priority (so Cloudflare Quick Tunnel works for download/watch right now, while permanent
-    domains still stick when explicitly configured):
-
-    1. permanent_backend_url — only when admin set a fixed domain via /backendurl or /baseurl
-    2. Latest cloudflare_url / CLOUDFLARE_URL if it is *.trycloudflare.com (live tunnel)
-    3. backend_url / BACKEND_URL if it is *.trycloudflare.com
-    4. Any other non-Vercel public backend_url / base_url (Named Tunnel / custom domain)
-    5. Remaining public candidates (never prefer Vercel for media links)
+    Resolve the active ngrok tunnel URL (https://*.ngrok-free.app) used exclusively
+    for download links (/dl/), stream/watch links (/watch/, /stream/, /remux/), and catalog button URLs.
     """
     try:
         rows = await settings_col.find(
-            {"key": {"$in": ["cloudflare_url", "backend_url", "base_url", "permanent_backend_url"]}},
+            {"key": {"$in": ["ngrok_url", "cloudflare_url", "backend_url", "base_url"]}},
             {"key": 1, "value": 1},
-        ).to_list(12)
+        ).to_list(10)
         stored = {r["key"]: r.get("value") for r in rows if isinstance(r, dict) and "key" in r}
     except Exception:
         stored = {}
 
-    def _norm(v) -> str | None:
-        return _valid_public_candidate(str(v) if v else None)
-
-    permanent = _norm(stored.get("permanent_backend_url"))
-    if permanent and not is_trycloudflare_url(permanent) and not is_vercel_url(permanent):
-        return permanent
-
-    # Live Quick Tunnel — must win for download/watch when no permanent domain is set
-    for raw in (
-        stored.get("cloudflare_url"),
-        os.environ.get("CLOUDFLARE_URL"),
-        stored.get("backend_url"),
-        settings.BACKEND_URL,
-        os.environ.get("BACKEND_URL"),
-        stored.get("base_url"),
-        settings.BASE_URL,
-        os.environ.get("BASE_URL"),
-    ):
-        c = _norm(raw)
-        if c and is_trycloudflare_url(c):
-            return c
-
-    # Explicit non-try backend (Named Tunnel / custom domain) without permanent key
-    for raw in (
-        stored.get("backend_url"),
-        settings.BACKEND_URL,
-        os.environ.get("BACKEND_URL"),
-        stored.get("base_url"),
-        settings.BASE_URL,
-        os.environ.get("BASE_URL"),
-    ):
-        c = _norm(raw)
-        if c and not is_trycloudflare_url(c) and not is_vercel_url(c):
-            return c
-
-    # Last resort: any valid public URL that is not Vercel
-    for raw in (
+    candidates = [
+        stored.get("ngrok_url"),
         stored.get("cloudflare_url"),
         stored.get("backend_url"),
-        stored.get("base_url"),
+        os.environ.get("NGROK_URL"),
         settings.BACKEND_URL,
+        stored.get("base_url"),
         settings.BASE_URL,
-        os.environ.get("CLOUDFLARE_URL"),
-        os.environ.get("BACKEND_URL"),
-        os.environ.get("BASE_URL"),
-    ):
-        c = _norm(raw)
-        if c and not is_vercel_url(c):
+    ]
+
+    valid_candidates = []
+    for c in candidates:
+        norm = _valid_public_candidate(str(c) if c else None)
+        if norm and norm not in valid_candidates:
+            valid_candidates.append(norm)
+
+    # 1. Always prefer any *.ngrok-free.app URL
+    for c in valid_candidates:
+        if is_trycloudflare_url(c):
             return c
 
-    return None
+    # 2. Next prefer any non-Vercel backend URL
+    for c in valid_candidates:
+        if not is_vercel_url(c):
+            return c
+
+    return valid_candidates[0] if valid_candidates else None
 
 
 async def get_active_vercel_website_url() -> str | None:
@@ -315,7 +282,7 @@ async def load_custom_settings() -> None:
                 upsert=True,
             )
 
-    # Clean any *.trycloudflare.com entries out of website_urls so website_urls stays strictly for Vercel
+    # Clean any *.ngrok-free.app entries out of website_urls so website_urls stays strictly for Vercel
     web_doc = await settings_col.find_one({"key": "website_urls"}, {"value": 1})
     if web_doc and isinstance(web_doc.get("value"), list):
         cleaned = [u for u in web_doc["value"] if not is_trycloudflare_url(str(u))]
@@ -325,7 +292,7 @@ async def load_custom_settings() -> None:
                 {"$set": {"value": cleaned, "updated_at": now}},
             )
 
-    # If an active Cloudflare URL is present on startup, ensure all catalog button URLs use it
+    # If an active ngrok URL is present on startup, ensure all catalog button URLs use it
     if active_cf:
         cursor = db.catalog_pages.find({"groups.0": {"$exists": True}}, {"_id": 1, "groups": 1})
         async for doc in cursor:

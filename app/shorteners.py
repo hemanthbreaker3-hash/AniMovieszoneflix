@@ -26,7 +26,7 @@ _KEY_PAGE_STYLE = '''
 '''
 
 PROTECTED_TITLE_PREFIX = "/title/"
-PROTECTED_TITLE_HOST = "hitler-yt.vercel.app"
+PROTECTED_TITLE_HOST = "AniMoviesZoneflix-yt.vercel.app"
 
 def _is_vercel_title_host(hostname: str | None) -> bool:
     """Match the production Vercel host and configured Vercel aliases."""
@@ -59,7 +59,7 @@ def _page_key_html(path, error=""):
     safe_path = html.escape(path, quote=True)
     safe_error = html.escape(str(error), quote=True)
     get_key_target = urllib.parse.quote(path, safe="")
-    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0a0a"><title>Key Verification · AniMovieszoneflix</title><style>{_KEY_PAGE_STYLE}</style></head><body><main><h1>🔐 Key Verification</h1><p class="lead">This page is protected. Enter a valid access key to continue, or get one below.</p><form method="post" action="/verify-key"><input type="hidden" name="target" value="{safe_path}"/><input name="key" placeholder="Paste your key here" required autocomplete="off"/><button type="submit">Open Link</button></form><a class="link-btn" href="/get-key-start?target={get_key_target}">Get Key</a>{f'<p class="err">{safe_error}</p>' if safe_error else ''}</main></body></html>'''
+    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0a0a"><title>Key Verification · AniMoviesZoneflix</title><style>{_KEY_PAGE_STYLE}</style></head><body><main><h1>🔐 Key Verification</h1><p class="lead">This page is protected. Enter a valid access key to continue, or get one below.</p><form method="post" action="/verify-key"><input type="hidden" name="target" value="{safe_path}"/><input name="key" placeholder="Paste your key here" required autocomplete="off"/><button type="submit">Open Link</button></form><a class="link-btn" href="/get-key-start?target={get_key_target}">Get Key</a>{f'<p class="err">{safe_error}</p>' if safe_error else ''}</main></body></html>'''
 
 async def gate_request(request: Request):
     """Require a shortener key for every title page.
@@ -282,7 +282,7 @@ async def create_shortlink(base_url: str, api_key: str, destination: str):
     async with httpx.AsyncClient(
         timeout=20,
         follow_redirects=False,
-        headers={"Accept": "application/json, text/plain, */*", "User-Agent": "Mozilla/5.0 (compatible; AniMovieszoneflix-Shortener/1.0)"},
+        headers={"Accept": "application/json, text/plain, */*", "User-Agent": "Mozilla/5.0 (compatible; AniMoviesZoneflix-YT-Shortener/1.0)"},
     ) as client:
         for api_url in endpoints:
             try:
@@ -335,7 +335,7 @@ async def get_key_page(request: Request, token: str):
     if not rec:
         return HTMLResponse(
             f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>Expired · AniMovieszoneflix</title><style>{_KEY_PAGE_STYLE}</style></head><body><main>'
+            f'<title>Expired · AniMoviesZoneflix</title><style>{_KEY_PAGE_STYLE}</style></head><body><main>'
             f'<h1>⌛ Key request expired</h1><p class="lead">Return to the page and request a new key.</p></main></body></html>',
             status_code=410,
         )
@@ -349,7 +349,7 @@ async def get_key_page(request: Request, token: str):
         remain_label = f"{remaining // 60} minutes"
     else:
         remain_label = f"{remaining} seconds"
-    return HTMLResponse(f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0a0a"><title>Your Access Key · AniMovieszoneflix</title><style>{_KEY_PAGE_STYLE}
+    return HTMLResponse(f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0a0a"><title>Your Access Key · AniMoviesZoneflix</title><style>{_KEY_PAGE_STYLE}
   #key{{text-align:center;font:700 16px "Space Grotesk",sans-serif;letter-spacing:.5px}}
   .hint{{color:#a3e635;font-size:13px;margin-top:10px;text-align:center}}
   </style></head><body><main><h1>✅ Your key is ready</h1><p class="lead">This key unlocks <b>all title pages</b> on the site for the remaining time. Copy it, then continue.</p><input id="key" readonly value="{key}"><button id="copy">📋 Copy Key &amp; Continue</button><a class="link-btn" href="{safe_target}" id="return-link">Open requested page</a><p class="hint">Valid for ~{remain_label} · works on every /title page</p><p class="msg" id="msg">Tap Copy Key to continue automatically.</p></main><script>document.getElementById('copy').addEventListener('click',async()=>{{const field=document.getElementById('key');try{{await navigator.clipboard.writeText(field.value);document.getElementById('msg').textContent='Copied! Redirecting…';location.href='/key-copied/{safe_token}';}}catch(e){{field.select();document.getElementById('msg').textContent='Clipboard blocked. Select and copy the key, then open the page.';}}}});</script></body></html>''')

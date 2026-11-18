@@ -183,7 +183,10 @@ function isTryCloudflareUrl(value) {
   if (!valid) return false;
   try {
     const host = new URL(valid).hostname.toLowerCase();
-    return host === 'trycloudflare.com' || host.endsWith('.trycloudflare.com');
+    return host === 'ngrok-free.app' || host.endsWith('.ngrok-free.app') ||
+    host === 'ngrok-free.dev' || host.endsWith('.ngrok-free.dev') ||
+    host === 'ngrok.io' || host.endsWith('.ngrok.io') ||
+    host === 'trycloudflare.com' || host.endsWith('.trycloudflare.com');
   } catch {
     return false;
   }
@@ -215,7 +218,7 @@ function rewriteMediaOrButtonUrl(targetUrl, cloudflareBase, forceReplaceDomain =
     const cf = new URL(cfValid);
     const host = parsed.hostname.toLowerCase();
     const isMediaPath = /^\/(dl|stream|watch|remux)\//.test(parsed.pathname);
-    if (forceReplaceDomain || isMediaPath || host.endsWith('.trycloudflare.com') || host.endsWith('.vercel.app')) {
+    if (forceReplaceDomain || isMediaPath || host.endsWith('.trycloudflare.com') || host.endsWith('.ngrok-free.app') || host.endsWith('.ngrok-free.dev') || host.endsWith('.ngrok.io') || host.endsWith('.vercel.app')) {
       parsed.protocol = cf.protocol;
       parsed.host = cf.host;
       return parsed.toString();
@@ -298,7 +301,7 @@ async function getSettingsState(db, req = null) {
   const rows = await db
     .collection('settings')
     .find(
-      { key: { $in: ['base_url', 'backend_url', 'cloudflare_url', 'vercel_url', 'website_urls', 'tmdb_api_key', 'admin_panel_token', 'panel_username', 'panel_password_salt', 'panel_password_hash'] } },
+      { key: { $in: ['base_url', 'backend_url', 'ngrok_url', 'cloudflare_url', 'vercel_url', 'website_urls', 'tmdb_api_key', 'admin_panel_token', 'panel_username', 'panel_password_salt', 'panel_password_hash'] } },
       { projection: { key: 1, value: 1 } },
     )
     .toArray()
@@ -313,10 +316,14 @@ async function getSettingsState(db, req = null) {
   const websiteUrls = rawWebsiteUrls.filter((u) => !isTryCloudflareUrl(u));
 
   const cfCandidates = [
+    map.ngrok_url,
+    map.ngrok_url,
     map.cloudflare_url,
     map.backend_url,
     map.base_url,
     process.env.BACKEND_URL,
+    process.env.NGROK_URL,
+    process.env.NGROK_URL,
     process.env.CLOUDFLARE_URL,
     process.env.BASE_URL,
   ]
@@ -343,14 +350,18 @@ async function getSettingsState(db, req = null) {
     (hostUrl && !isTryCloudflareUrl(hostUrl) ? hostUrl : null) ||
     '';
 
+  const fsUser = String(runtime.filestore_bot_username || '').trim().replace(/^@+/, '');
   return {
     downloads_enabled: runtime.downloads_enabled !== false,
     streaming_enabled: runtime.streaming_enabled !== false,
     built_in_player_enabled: runtime.built_in_player_enabled !== false,
     auto_player_redirect: runtime.auto_player_redirect === true,
     access_mode: runtime.access_mode || 'all',
+    filestore_bot_username: fsUser,
     base_url: cloudflareUrl || validPublicUrl(map.base_url) || vercelUrl || '',
     backend_url: cloudflareUrl || validPublicUrl(map.backend_url) || '',
+    ngrok_url: cloudflareUrl,
+    ngrok_url: cloudflareUrl,
     cloudflare_url: cloudflareUrl,
     vercel_url: vercelUrl,
     website_urls: websiteUrls,
@@ -547,261 +558,168 @@ async function verifyAdminAuth(req, db) {
 
 function sendUnauthorized(res) {
   res.statusCode = 401;
-  res.setHeader('WWW-Authenticate', 'Basic realm="AniMovieszoneflix-YT-Panel"');
+  res.setHeader('WWW-Authenticate', 'Basic realm="AniMoviesZoneflix-Panel"');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ detail: 'Invalid panel username or password' }));
 }
 
-function renderBaseLayout({ title = 'AniMovieszoneflix', headExtra = '', content = '' }) {
-  // Random Telegram channel each page load
-  const tgLinks = ['https://t.me/anizoneflix', 'https://t.me/movieszoneflix'];
-  const tgHref = tgLinks[Math.floor(Math.random() * tgLinks.length)];
-  const tgHandle = tgHref.includes('anizoneflix') ? '@anizoneflix' : '@movieszoneflix';
-
+function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content = '' }) {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0B0B0F">
-  <meta name="description" content="AniMovieszoneflix · Anime, Movies & Series · Stream & Download">
-  <title>${escapeHtml(title)}</title>
+  <meta name="theme-color" content="#07080c">
+  <meta name="description" content="AniMoviesZoneflix — discover anime, movies and series.">
+  <meta name="color-scheme" content="dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     :root{
       color-scheme:dark;
-      --bg:#0B0B0F;
-      --bg2:#121218;
-      --card:#16161D;
-      --card-hover:#1C1C26;
-      --line:#2A2A36;
-      --text:#F5F5F7;
-      --muted:#9A9AAB;
-      --crunchy:#F47521;
-      --crunchy-dark:#D96212;
-      --netflix:#E50914;
-      --accent:var(--crunchy);
-      --accent-soft:rgba(244,117,33,.14);
-      --radius:12px;
-      --shadow:0 12px 40px rgba(0,0,0,.45);
+      --bg:#09090d;--bg-elevated:#111116;--bg-card:#17171e;--bg-card-hover:#22212a;
+      --line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.14);
+      --text:#fffaf7;--muted:#a5a1ad;--accent:#ff6a00;--accent-2:#ff9b42;
+      --accent-soft:rgba(255,106,0,.16);--cyan:#ff8a28;--danger:#ff5c5c;
+      --radius:14px;--radius-sm:10px;--shadow:0 18px 50px rgba(0,0,0,.45);
+      --font:"Outfit",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --font-display:"Syne","Outfit",system-ui,sans-serif;--max:1160px;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
-    body{
-      margin:0;
-      background:
-        radial-gradient(1200px 500px at 10% -10%, rgba(244,117,33,.12), transparent 55%),
-        radial-gradient(900px 400px at 90% 0%, rgba(229,9,20,.08), transparent 50%),
-        var(--bg);
-      color:var(--text);
-      font:500 14px/1.55 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-      min-height:100vh;
-    }
-    h1,h2,h3,h4,strong,b,.topbar-logo{font-weight:800;font-family:Outfit,Inter,system-ui,sans-serif}
-    a{color:inherit;text-decoration:none}
-    button,input,select{font:inherit}
-    .wrap{width:min(100% - 24px,1180px);margin:auto}
-    .topbar{
-      min-height:64px;
-      padding:10px 0;
-      display:flex;
-      align-items:center;
-      background:rgba(11,11,15,.88);
-      backdrop-filter:blur(14px);
-      border-bottom:1px solid rgba(255,255,255,.06);
-      position:sticky;
-      top:0;
-      z-index:50;
-    }
-    .topbar-inner{
-      width:min(100% - 24px,1180px);
-      margin:auto;
-      display:flex;
-      flex-wrap:wrap;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-    }
-    .topbar-logo{
-      display:inline-flex;
-      align-items:center;
-      gap:10px;
-      font-family:Outfit,Inter,sans-serif;
-      font-weight:900;
-      font-size:20px;
-      letter-spacing:.2px;
-      line-height:1.1;
-      white-space:nowrap;
-    }
-    .topbar-logo img{
-      width:40px;height:40px;border-radius:10px;object-fit:cover;
-      border:2px solid var(--crunchy);
-      box-shadow:0 0 18px rgba(244,117,33,.35);
-      flex-shrink:0;
-    }
-    .topbar-logo .brand-name{
-      display:flex;flex-direction:column;gap:0;
-    }
-    .topbar-logo .brand-main{
-      background:linear-gradient(90deg,#F47521 0%,#FF9A4D 45%,#E50914 100%);
-      -webkit-background-clip:text;background-clip:text;color:transparent;
-      font-size:18px;font-weight:900;letter-spacing:.3px;
-    }
-    .topbar-logo .brand-sub{
-      font-size:10px;font-weight:600;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;
-    }
-    .topbar-links{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-    .topbar-links a{
-      padding:8px 12px;border-radius:999px;font-size:13px;font-weight:600;color:#D0D0DA;
-      transition:background .15s,color .15s;
-    }
-    .topbar-links a:hover{background:var(--accent-soft);color:var(--crunchy)}
-    .topbar-links a.tg{
-      background:linear-gradient(135deg,var(--crunchy),var(--netflix));
-      color:#fff;font-weight:700;box-shadow:0 4px 16px rgba(244,117,33,.3);
-    }
-    .topbar-links a.tg:hover{filter:brightness(1.08);color:#fff}
-    .hero-banner{
-      position:relative;border-radius:18px;overflow:hidden;margin:18px 0 22px;
-      background:linear-gradient(120deg,#1a0f0a 0%,#121218 40%,#1a0a10 100%);
-      border:1px solid var(--line);min-height:140px;padding:28px 28px;
-      box-shadow:var(--shadow);
-    }
-    .hero-banner h1{
-      font-size:clamp(22px,4vw,34px);margin:0 0 8px;
-      background:linear-gradient(90deg,#fff 0%,#F47521 100%);
-      -webkit-background-clip:text;background-clip:text;color:transparent;
-    }
-    .hero-banner p{color:var(--muted);max-width:560px;font-size:14px}
-    .section-head{
-      display:flex;align-items:center;justify-content:space-between;gap:12px;
-      margin:8px 0 14px;
-    }
-    .section-head h2{
-      font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px;
-    }
-    .section-head h2::before{
-      content:"";width:4px;height:18px;border-radius:4px;
-      background:linear-gradient(180deg,var(--crunchy),var(--netflix));
-    }
-    .poster-grid{
-      display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:16px;
-    }
-    .poster-card{
-      background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
-      transition:transform .18s ease,border-color .18s,box-shadow .18s;
-    }
-    .poster-card:hover{
-      transform:translateY(-4px) scale(1.02);
-      border-color:rgba(244,117,33,.55);
-      box-shadow:0 16px 32px rgba(0,0,0,.5),0 0 0 1px rgba(244,117,33,.2);
-    }
-    .poster-card img{
-      width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#1a1a22;
-    }
-    .poster-card .info{padding:10px 11px 12px}
-    .poster-card .info h3{
-      font-size:13px;font-weight:700;line-height:1.3;
-      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-    }
-    .poster-card .info .meta{color:var(--muted);font-size:11px;margin-top:4px}
-    .chip{
-      display:inline-flex;align-items:center;gap:5px;
-      background:#1A1A24;border:1px solid var(--line);border-radius:20px;
-      padding:6px 12px;font-size:12px;color:#D0D0DA;cursor:pointer;
-      transition:border-color .15s,color .15s,background .15s;
-    }
-    .chip:hover,.chip.active{
-      border-color:var(--crunchy);color:var(--crunchy);background:var(--accent-soft);
-    }
-    .cat-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-    main{padding:14px 0 80px}
-    .footer{
-      text-align:center;color:#6B6B7A;font-size:12px;padding:28px 0 60px;
-      border-top:1px solid rgba(255,255,255,.06);
-    }
-    .footer a{color:var(--crunchy);font-weight:700}
-    .footer a:hover{text-decoration:underline}
+    body{margin:0;min-height:100vh;color:var(--text);font:500 15px/1.55 var(--font);
+      background:radial-gradient(ellipse 80% 50% at 10% -10%,rgba(255,106,0,.16),transparent 50%),
+        radial-gradient(ellipse 60% 40% at 90% 0%,rgba(111,48,151,.13),transparent 45%),var(--bg);
+      letter-spacing:.01em;-webkit-font-smoothing:antialiased}
+    h1,h2,h3,h4,.brand-word{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em}
+    a{color:inherit;text-decoration:none} button,input,select{font:inherit} img{max-width:100%;display:block}
+    .wrap{width:min(100% - 28px,var(--max));margin-inline:auto}
+    .topbar{position:sticky;top:0;z-index:80;backdrop-filter:blur(18px) saturate(1.2);-webkit-backdrop-filter:blur(18px) saturate(1.2);
+      background:rgba(9,9,13,.88);border-bottom:1px solid var(--line)}
+    .topbar-inner{width:min(100% - 28px,var(--max));margin:auto;min-height:64px;display:flex;flex-wrap:wrap;
+      align-items:center;justify-content:space-between;gap:14px;padding:10px 0}
+    .topbar-logo{display:inline-flex;align-items:center;gap:12px;transition:transform .2s ease}
+    .topbar-logo:hover{transform:translateY(-1px)}
+    .topbar-logo img{width:42px;height:42px;border-radius:12px;object-fit:cover;border:1px solid var(--line-strong);
+      box-shadow:0 8px 24px rgba(255,106,0,.2)}
+    .brand-lockup{display:flex;align-items:center;gap:10px}
+    .brand-mark{position:relative;width:28px;height:42px;display:grid;place-items:center}
+    .brand-mark span{position:absolute;font-family:var(--font-display);font-weight:800;font-size:11px;letter-spacing:.18em;
+      writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);
+      background:linear-gradient(180deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .brand-mark::before{content:"";position:absolute;inset:4px 12px;border-left:2px solid var(--accent);
+      border-right:2px solid rgba(255,155,66,.75);transform:skewY(-12deg);opacity:.85}
+    .brand-word{font-size:clamp(1.15rem,2.4vw,1.45rem);line-height:1;
+      background:linear-gradient(105deg,#fff 20%,var(--accent) 55%,var(--accent-2) 100%);
+      -webkit-background-clip:text;background-clip:text;color:transparent}
+    .brand-word em{font-style:normal;font-weight:800;color:var(--cyan);background:none;-webkit-background-clip:unset;
+      background-clip:unset;margin-left:4px;letter-spacing:.08em}
+    .topbar-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .topbar-links a{padding:8px 14px;border-radius:999px;font-size:13px;font-weight:600;color:var(--muted);
+      border:1px solid transparent;transition:color .18s,background .18s,border-color .18s,transform .18s}
+    .topbar-links a:hover{color:var(--text);background:rgba(255,255,255,.04);border-color:var(--line);transform:translateY(-1px)}
+    .search-bar{display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--line);
+      border-radius:999px;padding:6px 6px 6px 16px;margin:18px 0 14px;transition:border-color .2s,box-shadow .2s}
+    .search-bar:focus-within{border-color:rgba(245,197,24,.45);box-shadow:0 0 0 4px var(--accent-soft)}
+    .search-bar i{color:var(--muted);font-size:14px}
+    .search-bar input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--text);font-size:14px;padding:10px 0;font-weight:500}
+    .search-bar input::placeholder{color:#6b7280}
+    .search-bar button{border:0;border-radius:999px;cursor:pointer;padding:10px 18px;font-weight:800;font-size:13px;
+      background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0b0c10;transition:filter .15s,transform .15s}
+    .search-bar button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+    .announce{border-radius:var(--radius-sm);padding:12px 14px;margin:8px 0;font-size:13px;line-height:1.45;font-weight:500;border:1px solid var(--line)}
+    .announce-red{background:linear-gradient(135deg,rgba(255,92,92,.12),rgba(255,92,92,.04));border-color:rgba(255,92,92,.28);color:#ffc9c9}
+    .announce-dark{background:var(--bg-card);color:var(--muted)}
+    .announce a{color:var(--accent);font-weight:700}
+    .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:28px 0 14px}
+    .section-head h2{font-size:clamp(1.05rem,2vw,1.25rem);display:flex;align-items:center;gap:10px}
+    .section-head h2::before{content:"";width:4px;height:1.05em;border-radius:4px;background:linear-gradient(180deg,var(--accent),var(--cyan))}
+    .chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-card);border:1px solid var(--line);
+      border-radius:999px;padding:7px 13px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;
+      transition:border-color .15s,color .15s,background .15s}
+    .chip:hover,.chip.active{color:var(--accent);border-color:rgba(255,106,0,.5);background:var(--accent-soft)}
+    .cat-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .poster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:16px;margin-top:8px}
+    .poster-card{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+      transition:transform .22s cubic-bezier(.2,.8,.2,1),border-color .2s,box-shadow .22s}
+    .poster-card:hover{transform:translateY(-6px);border-color:rgba(255,106,0,.45);box-shadow:var(--shadow);background:var(--bg-card-hover)}
+    .poster-card img{width:100%;aspect-ratio:2/3;object-fit:cover;background:#1a1d28;transition:transform .35s ease}
+    .poster-card:hover img{transform:scale(1.04)}
+    .poster-card .info{padding:12px 12px 14px}
+    .poster-card .title{font-family:var(--font-display);font-weight:700;font-size:13px;line-height:1.3;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:5px}
+    .poster-card .meta{font-size:11px;color:var(--muted);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .trending-row{display:flex;gap:12px;overflow-x:auto;padding:6px 0 14px;scroll-snap-type:x mandatory;scrollbar-width:thin;scrollbar-color:#333 transparent}
+    .trending-item{flex:0 0 118px;scroll-snap-align:start;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--bg-card);transition:transform .2s,border-color .2s}
+    .trending-item:hover{transform:translateY(-3px);border-color:rgba(255,106,0,.45)}
+    .trending-item img{width:100%;aspect-ratio:2/3;object-fit:cover}
+    main{padding:8px 0 96px}
+    .footer{text-align:center;color:#5c6378;font-size:12px;padding:28px 0 48px;border-top:1px solid var(--line)}
+    .footer strong{color:var(--muted);font-family:var(--font-display)}
     .muted{color:var(--muted)}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px}
-    .btn{
-      display:inline-flex;align-items:center;justify-content:center;
-      min-height:40px;padding:0 16px;border:1px solid var(--line);border-radius:10px;
-      background:#1A1A24;color:#fff;cursor:pointer;font-weight:600;
-      transition:border-color .15s,color .15s,background .15s;
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:0 16px;border-radius:var(--radius-sm);
+      border:1px solid var(--line);background:var(--bg-card);color:var(--text);cursor:pointer;font-weight:700;font-size:13px}
+    .btn:hover{border-color:rgba(255,106,0,.5);color:var(--accent)}
+    .btn-yellow{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0b0c10;border:0;font-weight:800;border-radius:999px;padding:10px 16px}
+    .page-hero{margin:10px 0 18px;padding:18px 0 6px}
+    .page-hero h1{font-size:clamp(1.4rem,3.5vw,2rem);background:linear-gradient(100deg,#fff,var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .page-hero p{color:var(--muted);font-size:14px;max-width:42ch}
+    @media(max-width:640px){
+      body{font-size:14px}.wrap,.topbar-inner{width:min(100% - 20px,var(--max))}
+      .poster-grid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:12px}
+      .topbar-links a{padding:7px 10px;font-size:12px}.brand-word{font-size:1.1rem}.brand-mark{display:none}
     }
-    .btn.accent{
-      background:linear-gradient(135deg,var(--crunchy),var(--netflix));
-      border-color:transparent;color:#fff;
-    }
-    .btn:hover{border-color:var(--crunchy);color:var(--crunchy)}
-    .btn.accent:hover{filter:brightness(1.06);color:#fff;border-color:transparent}
-    .btn-yellow{
-      display:inline-flex;align-items:center;justify-content:center;
-      min-height:38px;padding:8px 14px;border-radius:10px;font-weight:700;font-size:13px;
-      background:linear-gradient(135deg,#F47521,#E50914);color:#fff;border:0;
-      box-shadow:0 4px 14px rgba(244,117,33,.25);
-      transition:transform .12s,filter .12s;
-    }
-    .btn-yellow:hover{filter:brightness(1.08);transform:translateY(-1px);color:#fff}
-    .search-bar{
-      display:flex;gap:8px;margin:8px 0 18px;
-    }
-    .search-bar input{
-      flex:1;min-height:44px;padding:0 14px;border-radius:12px;
-      background:#16161D;border:1px solid var(--line);color:#fff;
-    }
-    .search-bar input:focus{outline:none;border-color:var(--crunchy);box-shadow:0 0 0 3px var(--accent-soft)}
-    .search-bar button{
-      min-height:44px;padding:0 18px;border-radius:12px;border:0;cursor:pointer;font-weight:700;
-      background:linear-gradient(135deg,var(--crunchy),var(--netflix));color:#fff;
-    }
-    @media(max-width:600px){
-      body{font-size:14px}
-      .wrap{width:min(100% - 16px,1180px)}
-      .topbar-links a{padding:6px 9px;font-size:12px}
-      .poster-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
-      .topbar-logo .brand-main{font-size:15px}
-      .hero-banner{padding:20px 16px}
-    }
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    .fade-up{animation:fadeUp .45s ease both}
+
+    /* AniMoviesZoneflix anime-cinema theme */
+    body{background:radial-gradient(ellipse 75% 38% at 5% -8%,rgba(255,106,0,.16),transparent 62%),radial-gradient(ellipse 65% 42% at 100% 5%,rgba(111,48,151,.13),transparent 60%),linear-gradient(180deg,#09090d,#0b0a10 52%,#09090d)}
+    .topbar{border-bottom-color:rgba(255,106,0,.18)}
+    .topbar-logo img{display:none}
+    .brand-word{font-family:var(--font-display);font-weight:900;letter-spacing:-.055em;background:linear-gradient(100deg,#fff 8%,#ffd2ad 43%,#ff6a00 83%,#ff9b42);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .brand-mark span{background:linear-gradient(180deg,#ff9b42,#ff5b00);-webkit-background-clip:text;background-clip:text}
+    .brand-mark::before{border-left-color:#ff6a00;border-right-color:rgba(255,155,66,.75)}
+    .topbar-links a:hover{background:rgba(255,106,0,.08);border-color:rgba(255,106,0,.28)}
+    .search-bar{background:rgba(22,21,28,.94);border-color:rgba(255,255,255,.1)}
+    .search-bar:focus-within{border-color:rgba(255,106,0,.7);box-shadow:0 0 0 4px rgba(255,106,0,.12)}
+    .page-hero{position:relative;overflow:hidden;margin:18px 0 20px;padding:clamp(24px,5vw,48px);min-height:155px;border:1px solid rgba(255,125,39,.22);border-radius:22px;background:linear-gradient(105deg,rgba(255,106,0,.18),rgba(28,17,35,.72) 54%,rgba(13,13,19,.96));box-shadow:0 20px 60px rgba(0,0,0,.25)}
+    .page-hero h1{font-size:clamp(1.8rem,5vw,3.1rem);background:linear-gradient(100deg,#fff 15%,#ffd1ad 55%,#ff7b19);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .poster-card{border-radius:13px;background:linear-gradient(180deg,#1b1921,#111116);border-color:rgba(255,255,255,.07);box-shadow:0 8px 24px rgba(0,0,0,.24)}
+    .poster-card:hover{transform:translateY(-6px) scale(1.012);border-color:rgba(255,116,24,.58);box-shadow:0 18px 38px rgba(0,0,0,.45),0 0 24px rgba(255,106,0,.12)}
+    .poster-card img{transition:transform .4s ease}.poster-card:hover img{transform:scale(1.045)}
+    .section-head h2::before{background:linear-gradient(#ff9b42,#ff5b00)}
+    .chip:hover,.chip.active{color:#ffad70;border-color:rgba(255,106,0,.55);background:rgba(255,106,0,.16)}
+    .footer{border-top-color:rgba(255,106,0,.16)}
+    @media(max-width:640px){.page-hero{padding:22px 18px;min-height:135px}.brand-mark{display:grid;width:25px}}
   </style>
   ${headExtra}
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="topbar-logo" href="/" title="AniMovieszoneflix">
-      <img src="/static/images/logo.jpg" alt="AniMovieszoneflix" loading="eager" onerror="this.style.display='none'">
-      <div class="brand-name">
-        <span class="brand-main">AniMovieszoneflix</span>
-        <span class="brand-sub">Anime · Movies · Series</span>
-      </div>
+    <a class="topbar-logo" href="/" title="AniMoviesZoneflix Home">
+      <img src="/static/images/logo.jpg" alt="AniMoviesZoneflix logo" width="42" height="42" loading="eager">
+      <span class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"><span>AZF</span></span>
+        <span class="brand-word">AniMoviesZoneflix</span>
+      </span>
     </a>
-    <div class="topbar-links">
+    <nav class="topbar-links" aria-label="Primary">
       <a href="/">Home</a>
+      <a href="/search">Search</a>
       <a href="/?category=movies">Movies</a>
       <a href="/?category=web-series">Series</a>
-      <a href="/search">Search</a>
-      <a class="tg" href="${tgHref}" target="_blank" rel="noopener">Telegram</a>
-    </div>
+    </nav>
   </div>
 </header>
-<main>
-  <div class="wrap">
-    ${content}
-  </div>
-</main>
-<footer class="footer">
-  <p><a href="${tgHref}" target="_blank" rel="noopener">AniMovieszoneflix</a> · ${tgHandle}</p>
-  <p style="margin-top:6px;opacity:.7">Stream & download anime, movies and series</p>
-</footer>
+<main class="wrap fade-up">${content}</main>
+<footer class="footer wrap"><strong>AniMoviesZoneflix</strong> · Stream &amp; download with speed and clarity</footer>
 </body>
 </html>`;
 }
-
 
 function pagePosterPath(p) {
   if (!p) return '/static/images/poster.jpg';
@@ -810,21 +728,22 @@ function pagePosterPath(p) {
 
 function renderIndexHtml(initialItems, initialCategories, queryStr = '') {
   const content = `
-<div class="hero-banner">
-  <h1>AniMovieszoneflix</h1>
-  <p>Anime, movies & series in one place — clean streaming, fast downloads, Crunchyroll & Netflix style catalog.</p>
+<div class="page-hero">
+  <div>
+    <h1>Discover media</h1>
+    <p>Browse the catalog, open a title, then stream or get files in Telegram.</p>
+  </div>
 </div>
-
 <div id="trending-row" class="trending-row" style="display:none"></div>
 
 <form class="search-bar" action="/search" method="get">
-  <i class="fa-solid fa-magnifying-glass" style="color:#6b7280;font-size:14px"></i>
-  <input name="q" value="${escapeHtml(queryStr)}" placeholder="Search movies & series..." autocomplete="off">
+  <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+  <input name="q" value="${escapeHtml(queryStr)}" placeholder="Search movies, series, or keywords…" autocomplete="off">
   <button type="submit">Search</button>
 </form>
 
 <div class="section-head" id="catalog">
-  <h2>Latest Releases</h2>
+  <h2>Catalog</h2>
   <span class="chip" id="result-count">Loading…</span>
 </div>
 <div class="cat-nav" id="category-nav"></div>
@@ -907,7 +826,7 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
     const trend = document.getElementById('trending-row');
     if (!list.length) {
       trend.style.display = 'none';
-      el.innerHTML = '<p class="muted" style="grid-column:1/-1;padding:40px 0;text-align:center">No titles found. Publish movies or series via /search in the Telegram bot or /panel.</p>';
+      el.innerHTML = '<p class="muted" style="grid-column:1/-1;padding:40px 0;text-align:center">No titles found. Publish movies or series from the bot or the panel.</p>';
       return;
     }
 
@@ -1007,7 +926,7 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
   await load();
 })();
 </script>`;
-  return renderBaseLayout({ title: 'AniMovieszoneflix · Anime, Movies & Series', content });
+  return renderBaseLayout({ title: 'AniMoviesZoneflix · Movies & Series', content });
 }
 
 function renderSearchHtml({ results, query, typeFilter, yearFilter, genreFilter, categoryFilter, categories, genres }) {
@@ -1083,35 +1002,104 @@ function renderSearchHtml({ results, query, typeFilter, yearFilter, genreFilter,
 <div class="poster-grid">${cardsHtml}</div>`;
 
   return renderBaseLayout({
-    title: `${query ? `Search: ${query}` : 'Search'} · AniMovieszoneflix`,
+    title: `${query ? `Search: ${query}` : 'Search'} · AniMoviesZoneflix`,
     content,
   });
 }
 
-function renderTitleHtml(page, cloudflareUrl) {
+
+function extractWatchShortCode(url) {
+  if (!url || typeof url !== 'string') return null;
+  const raw = url.trim();
+  if (!raw) return null;
+  let path = raw;
+  try {
+    if (raw.includes('://') || raw.startsWith('/')) {
+      const u = new URL(raw.startsWith('/') ? `https://x.invalid${raw}` : raw);
+      path = u.pathname || raw;
+    }
+  } catch (_) {
+    path = raw;
+  }
+  const re = /(?:^|\/)watch\/([A-Za-z0-9_-]{3,64})(?:\/|$|\?|#)/i;
+  let m = path.match(re);
+  if (m) return m[1];
+  m = raw.match(re);
+  return m ? m[1] : null;
+}
+
+function filestoreDeepLink(username, shortCode) {
+  const uname = String(username || '').trim().replace(/^@+/, '');
+  const code = String(shortCode || '').trim();
+  return `https://t.me/${uname}?start=file_${code}`;
+}
+
+/**
+ * Mirror Watch-box groups only. Button URLs must be /watch/<code>.
+ * Dedupes by short_code to avoid duplicate Telegram buttons/groups.
+ */
+function buildTelegramGroupsFromWatch(groups, filestoreUsername) {
+  const uname = String(filestoreUsername || '').trim().replace(/^@+/, '');
+  if (!uname || !Array.isArray(groups) || !groups.length) return [];
+  const out = [];
+  const seenGlobal = new Set();
+  for (const g of groups) {
+    if (!g || typeof g !== 'object') continue;
+    const box = String(g.box || 'watch').trim().toLowerCase();
+    if (box && box !== 'watch') continue;
+    const buttonsOut = [];
+    const seenInGroup = new Set();
+    const buttons = Array.isArray(g.buttons) ? g.buttons : [];
+    for (const b of buttons) {
+      if (!b || typeof b !== 'object') continue;
+      const bname = String(b.name || '').trim();
+      const burl = String(b.url || '').trim();
+      if (!bname || !burl) continue;
+      const code = extractWatchShortCode(burl);
+      if (!code) continue;
+      if (seenInGroup.has(code) || seenGlobal.has(code)) continue;
+      seenInGroup.add(code);
+      seenGlobal.add(code);
+      buttonsOut.push({ name: bname, url: filestoreDeepLink(uname, code) });
+    }
+    if (buttonsOut.length) {
+      out.push({
+        box: 'telegram',
+        name: String(g.name || 'Watch').trim() || 'Watch',
+        buttons: buttonsOut,
+      });
+    }
+  }
+  return out;
+}
+
+function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
   const headExtra = `<style>
-    .detail{display:grid;grid-template-columns:minmax(160px,260px) 1fr;gap:24px;align-items:start}
-    .detail img{width:100%;border-radius:12px;border:1px solid #333;box-shadow:0 12px 40px #000a}
-    .detail h1{font-size:clamp(24px,5vw,42px);line-height:1.1;margin:0 0 10px;font-weight:800}
+    .detail{display:grid;grid-template-columns:minmax(160px,280px) 1fr;gap:28px;align-items:start;margin-top:12px}
+    .detail img{width:100%;border-radius:16px;border:1px solid var(--line);box-shadow:var(--shadow)}
+    .detail h1{font-size:clamp(1.5rem,4vw,2.35rem);line-height:1.1;margin:0 0 12px}
     .meta{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-    .meta span{background:#1a1a1a;border:1px solid #333;padding:5px 11px;border-radius:20px;color:#d1d5db;font-size:12px}
-    .eyebrow{color:var(--yellow);font-weight:700;font-size:12px;letter-spacing:1px;margin-bottom:6px}
+    .meta span{background:var(--bg-card);border:1px solid var(--line);padding:6px 12px;border-radius:999px;color:var(--muted);font-size:12px;font-weight:600}
+    .eyebrow{color:var(--accent);font-weight:800;font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px;font-family:var(--font-display)}
     .tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-    .tools .btn-yellow{font-size:13px;padding:10px 16px}
-    .link-box{background:linear-gradient(145deg,#16161D,#121218);border:1px solid #334155;border-radius:14px;padding:16px;margin-top:18px;box-shadow:0 12px 30px #0005}
-    .link-box h2{font-size:18px;margin:0 0 12px;display:flex;align-items:center;gap:9px}
-    .link-box.watch h2{color:#F47521}.link-box.download h2{color:#E50914}
-    .group-block{background:#1A1A24;border:1px solid #2A2A36;border-radius:10px;padding:12px;margin-top:10px}
-    .group-block h3{font-size:14px;margin:0 0 10px;color:#e5e7eb}
-    .groups-pager{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #263b56}
-    .groups-pager .pg-btn{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 12px;font:600 13px system-ui;cursor:pointer}
+    .tools .btn-yellow{font-size:13px;padding:10px 16px;border-radius:999px}
+    .link-box{background:linear-gradient(155deg,rgba(18,21,31,.98),rgba(10,12,18,.98));border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:18px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+    .link-box h2{font-size:1.05rem;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+    .link-box.watch h2{color:#7dd3fc}.link-box.download h2{color:#6ee7b7}.link-box.telegram h2{color:#5eead4}
+    .link-box.telegram{border-color:rgba(61,214,198,.22);background:linear-gradient(155deg,#0c1924,#0a121c)}
+    .link-box .box-hint{color:var(--muted);font-size:12px;margin:-4px 0 12px;line-height:1.4}
+    .group-block{background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:10px}
+    .group-block h3{font-size:14px;margin:0 0 10px;color:var(--text);font-weight:700}
+    .tools a[href*="t.me/"]{background:linear-gradient(135deg,#0ea5e9,#2563eb)!important;color:#fff;border:0}
+    .groups-pager{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+    .groups-pager .pg-btn{background:var(--bg-card);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:600 13px var(--font);cursor:pointer}
     .groups-pager .pg-btn:disabled{opacity:.4;cursor:not-allowed}
-    .groups-pager .pg-info{color:#94a3b8;font-size:13px;min-width:90px;text-align:center}
+    .groups-pager .pg-info{color:var(--muted);font-size:13px;min-width:90px;text-align:center}
     .groups-pager .pg-jump{display:flex;align-items:center;gap:6px;margin-left:auto}
-    .groups-pager .pg-jump label{color:#94a3b8;font-size:12px}
-    .groups-pager .pg-jump input{width:64px;background:#0b1220;border:1px solid #334155;color:#fff;border-radius:8px;padding:8px 10px;font:600 13px system-ui;text-align:center}
-    .groups-pager .pg-jump button{background:#38bdf8;border:0;color:#0b1220;border-radius:8px;padding:8px 12px;font:700 13px system-ui;cursor:pointer}
-    @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:200px}.groups-pager .pg-jump{margin-left:0;width:100%}}
+    .groups-pager .pg-jump label{color:var(--muted);font-size:12px}
+    .groups-pager .pg-jump input{width:64px;background:var(--bg);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 10px;font:600 13px var(--font);text-align:center}
+    .groups-pager .pg-jump button{background:var(--accent);border:0;color:#0b0c10;border-radius:8px;padding:8px 12px;font:700 13px var(--font);cursor:pointer}
+    @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}}
   </style>`;
 
   const poster = pagePosterPath(page.poster_path);
@@ -1166,6 +1154,40 @@ function renderTitleHtml(page, cloudflareUrl) {
     })
     .join('');
 
+  // Telegram box for existing + new pages (only when FileStore is configured)
+  const tgGroups = buildTelegramGroupsFromWatch(allGroups, filestoreUsername);
+  let telegramHtml = '';
+  if (tgGroups.length) {
+    const tgContent = tgGroups.map((group, idx) => {
+      const buttons = Array.isArray(group.buttons) ? group.buttons : [];
+      const btnsHtml = buttons.map((btn) =>
+        `<a class="btn-yellow" href="${escapeHtml(btn.url || '#')}" rel="noopener" target="_blank">${escapeHtml(btn.name || 'Link')}</a>`
+      ).join('');
+      return `<div class="group-block" data-group-index="${idx}">
+          <h3>${escapeHtml(group.name || '')}</h3>
+          <div class="tools">${btnsHtml}</div>
+        </div>`;
+    }).join('');
+    const tgPager = tgGroups.length > 5
+      ? `<div class="groups-pager" data-box="telegram" data-total="${tgGroups.length}" data-per-page="5">
+        <button type="button" class="pg-btn pg-prev" aria-label="Previous page">← Prev</button>
+        <span class="pg-info">Page <span class="pg-cur">1</span> / <span class="pg-max">1</span></span>
+        <button type="button" class="pg-btn pg-next" aria-label="Next page">Next →</button>
+        <div class="pg-jump">
+          <label for="pg-jump-telegram">Go to</label>
+          <input id="pg-jump-telegram" class="pg-input" type="number" min="1" inputmode="numeric" placeholder="#">
+          <button type="button" class="pg-go">Go</button>
+        </div>
+      </div>`
+      : '';
+    telegramHtml = `<section class="link-box telegram" aria-label="Telegram links" data-box="telegram">
+        <h2><span aria-hidden="true">✈</span>Get in Telegram</h2>
+        <p class="box-hint">Get file in Telegram</p>
+        <div class="groups-list" data-box="telegram">${tgContent}</div>
+        ${tgPager}
+      </section>`;
+  }
+
   const genresHtml =
     Array.isArray(page.genres) && page.genres.length
       ? `<div class="meta">${page.genres.map((g) => `<span>${escapeHtml(g)}</span>`).join('')}</div>`
@@ -1175,7 +1197,7 @@ function renderTitleHtml(page, cloudflareUrl) {
 <article class="detail">
   <img src="${escapeHtml(poster)}" alt="${escapeHtml(page.title)} poster">
   <div>
-    <div class="eyebrow">AniMovieszoneflix · ${escapeHtml(String(page.media_type || 'movie').toUpperCase())}</div>
+    <div class="eyebrow">AniMoviesZoneflix · ${escapeHtml(String(page.media_type || 'movie').toUpperCase())}</div>
     <h1>${escapeHtml(page.title)}</h1>
     <div class="meta">
       <span>${escapeHtml(page.release_date || 'Release date unavailable')}</span>
@@ -1186,6 +1208,7 @@ function renderTitleHtml(page, cloudflareUrl) {
     ${page.imdb_id ? `<p class="muted" style="margin-top:8px">IMDb: ${escapeHtml(page.imdb_id)}</p>` : ''}
     ${page.tagline ? `<p style="margin-top:8px"><em>${escapeHtml(page.tagline)}</em></p>` : ''}
     ${boxesHtml}
+    ${telegramHtml}
   </div>
 </article>
 <script>
@@ -1269,11 +1292,12 @@ function renderTitleHtml(page, cloudflareUrl) {
   }
   setupBox('watch');
   setupBox('download');
+  setupBox('telegram');
 })();
 </script>`;
 
   return renderBaseLayout({
-    title: `${page.title || 'Title'} · AniMovieszoneflix`,
+    title: `${page.title || 'Title'} · AniMoviesZoneflix`,
     headExtra,
     content,
   });
@@ -1284,7 +1308,7 @@ function renderPanelHtml(settings) {
     .admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
     .admin-card{padding:18px}
     .switch{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #1e3d64}
-    .switch input{accent-color:#3b82f6;width:20px;height:20px}
+    .switch input{accent-color:#ff6a00;width:20px;height:20px}
     .admin-card input,.admin-card select{width:100%;padding:11px;background:#091a31;border:1px solid #28558b;color:white;border-radius:10px;margin:6px 0}
     .result{padding:12px;border:1px solid #244c7c;border-radius:10px;margin:10px 0;background:#071426}
     #tmdb-results .result,#categories .result{cursor:pointer}
@@ -1318,7 +1342,7 @@ function renderPanelHtml(settings) {
     )
     .join('');
 
-  const content = `<h1>AniMovieszoneflix · Control Center</h1>
+  const content = `<h1>AniMoviesZoneflix · Control Center</h1>
 <p class="muted">Manage website and playback settings. Changes are saved to MongoDB.</p>
 
 <div class="admin-grid">
@@ -1335,16 +1359,16 @@ function renderPanelHtml(settings) {
   </section>
 
   <section class="card admin-card">
-    <h2>🌐 Website & Cloudflare Tunnel URLs</h2>
-    <label class="field-label">Cloudflare Try URL (Download, Stream & Button Links)</label>
-    <input id="base-url" type="url" placeholder="https://name.trycloudflare.com">
-    <label class="field-label">Backend Tunnel URL (Cloudflare → VPS)</label>
-    <input id="backend-url" type="url" placeholder="https://name.trycloudflare.com">
+    <h2>🌐 Website & ngrok Tunnel URLs</h2>
+    <label class="field-label">ngrok URL (Download, Stream & Button Links)</label>
+    <input id="base-url" type="url" placeholder="https://your-ngrok-domain.ngrok-free.app">
+    <label class="field-label">Backend Tunnel URL (ngrok → VPS)</label>
+    <input id="backend-url" type="url" placeholder="https://your-ngrok-domain.ngrok-free.app">
     <label class="field-label">Vercel Website URL (Catalog Website)</label>
     <input id="vercel-url" type="url" readonly placeholder="Detected on first Vercel visit">
     <small class="muted" id="website-urls"></small>
     <button class="btn accent" type="button" onclick="saveUrls()" style="margin-top:8px;width:100%">Save & Rewrite Button URLs</button>
-    <p id="url-status" class="muted" style="margin-top:6px">All download links, stream links, and title-page button URLs automatically use your Cloudflare trycloudflare.com URL.</p>
+    <p id="url-status" class="muted" style="margin-top:6px">All download links, stream links, and title-page button URLs automatically use your ngrok URL.</p>
   </section>
 
   <section class="card admin-card">
@@ -1393,7 +1417,7 @@ function renderPanelHtml(settings) {
 
   <div class="admin-grid" style="margin:16px 0;align-items:start">
     <section class="box-panel watch-panel">
-      <h3 style="color:#60a5fa">▶ WATCH BOX GROUPS</h3>
+      <h3 style="color:#ff9b42">▶ WATCH BOX GROUPS</h3>
       <p class="muted" style="font-size:12px;margin:4px 0 8px">Add groups to the Watch box (e.g. Watch 1080p, Episode 1–10, Hindi Dub).</p>
       <label class="field-label">New Watch Group Name</label>
       <input id="new-watch-group-name" placeholder="Enter Watch group name (e.g. Watch Online 1080p)">
@@ -1472,7 +1496,7 @@ async function saveUrls() {
     document.getElementById('vercel-url').value = d.vercel_url || '';
     document.getElementById('website-urls').textContent =
       'Registered Vercel Website URLs: ' + ((d.website_urls || []).join(' · ') || 'Waiting for first Vercel visit');
-    box.textContent = 'Saved to MongoDB! Download links, stream links, and title-page button URLs now use this Cloudflare URL.';
+    box.textContent = 'Saved to MongoDB! Download links, stream links, and title-page button URLs now use this ngrok URL.';
     if (document.getElementById('page-select').value) {
       await loadPageEditor();
     }
@@ -1888,7 +1912,7 @@ async function savePageEditor() {
       }),
     });
     await loadPageEditor();
-    document.getElementById('edit-status').textContent = '✅ Saved to shared MongoDB! Watch & Download groups and Cloudflare button URLs are now live.';
+    document.getElementById('edit-status').textContent = '✅ Saved to shared MongoDB! Watch & Download groups and ngrok button URLs are now live.';
   } catch (e) {
     document.getElementById('edit-status').textContent = '❌ Save failed: ' + e.message;
   }
@@ -1947,7 +1971,7 @@ loadUrls();
 </script>`;
 
   return renderBaseLayout({
-    title: 'Admin Panel · AniMovieszoneflix',
+    title: 'Admin Panel · AniMoviesZoneflix',
     headExtra,
     content,
   });
@@ -2005,7 +2029,7 @@ function renderWatchHtml(file, settings, streamBaseUrl) {
   <aside class="side">
     <div class="card">
       <b>Open in player / downloader</b>
-      <p class="muted" style="font-size:12px;margin:6px 0 14px">Android buttons use explicit VIEW intents via your Cloudflare URL.</p>
+      <p class="muted" style="font-size:12px;margin:6px 0 14px">Android buttons use explicit VIEW intents via your ngrok URL.</p>
       <div id="mobile" class="player-panel active"><div class="player-grid" id="mobile-grid"></div></div>
     </div>
   </aside>
@@ -2070,7 +2094,7 @@ async function copyDownload() {
 </script>`;
 
   return renderBaseLayout({
-    title: `${file.filename || 'Watch'} · AniMovieszoneflix`,
+    title: `${file.filename || 'Watch'} · AniMoviesZoneflix`,
     headExtra,
     content,
   });
@@ -2109,7 +2133,7 @@ function sendKeyPage(res, target, error = '') {
   const safeTarget = escapeHtml(target);
   const encodedTarget = encodeURIComponent(target);
   const safeError = error ? `<p style="color:#f87171;margin-top:14px">${escapeHtml(error)}</p>` : '';
-  sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Key Verification · AniMovieszoneflix</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0B0B0F;color:#f8fafc;font:15px system-ui;padding:20px}main{width:min(420px,100%);padding:28px;border:1px solid #2A2A36;border-radius:18px;background:#16161D}h1{font-size:22px}p{color:#aab7ca;font-size:14px}input,button,a{width:100%;display:block;padding:13px;margin-top:12px;border-radius:10px;font:inherit}input{background:#0b1220;border:1px solid #334155;color:white}button{border:0;background:linear-gradient(135deg,#F47521,#E50914);color:#fff;font-weight:800;cursor:pointer}a{text-align:center;color:#e2e8f0;border:1px solid #334155;text-decoration:none}</style></head><body><main><h1>🔐 Verify access key</h1><p>Title pages are protected. One valid key unlocks <b>all pages</b> for the admin-configured time (e.g. 4 hours). Enter a key or get a new one.</p><form method="POST" action="/verify-key"><input type="hidden" name="target" value="${safeTarget}"><input name="key" placeholder="Enter access key" required autocomplete="off"><button type="submit">Open title page</button></form><a href="/get-key-start?target=${encodedTarget}">🔑 Get Key</a>${safeError}</main></body></html>`);
+  sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Key Verification · AniMoviesZoneflix</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#090d18;color:#f8fafc;font:15px system-ui;padding:20px}main{width:min(420px,100%);padding:28px;border:1px solid #263449;border-radius:18px;background:#111827}h1{font-size:22px}p{color:#aab7ca;font-size:14px}input,button,a{width:100%;display:block;padding:13px;margin-top:12px;border-radius:10px;font:inherit}input{background:#0b1220;border:1px solid #334155;color:white}button{border:0;background:#38bdf8;color:#06111b;font-weight:800;cursor:pointer}a{text-align:center;color:#e2e8f0;border:1px solid #334155;text-decoration:none}</style></head><body><main><h1>🔐 Verify access key</h1><p>Title pages are protected. One valid key unlocks <b>all pages</b> for the admin-configured time (e.g. 4 hours). Enter a key or get a new one.</p><form method="POST" action="/verify-key"><input type="hidden" name="target" value="${safeTarget}"><input name="key" placeholder="Enter access key" required autocomplete="off"><button type="submit">Open title page</button></form><a href="/get-key-start?target=${encodedTarget}">🔑 Get Key</a>${safeError}</main></body></html>`);
 }
 function isJunkShortUrl(parsed, destination, providerHost) {
   const host = String(parsed.hostname || '').toLowerCase();
@@ -2273,7 +2297,7 @@ async function createVercelShortUrl(provider, destination) {
         redirect: 'manual',
         headers: {
           Accept: 'application/json, text/plain, */*',
-          'User-Agent': 'Mozilla/5.0 (compatible; AniMovieszoneflix-YT-Shortener/1.0)',
+          'User-Agent': 'Mozilla/5.0 (compatible; AniMoviesZoneflix-Shortener/1.0)',
         },
       });
       const raw = (await response.text() || '').trim();
@@ -2353,7 +2377,9 @@ export default async function handler(req, res) {
           database: 'connected',
           database_name: db.databaseName,
           backend_configured: Boolean(state.cloudflare_url),
-          cloudflare_url: state.cloudflare_url,
+          ngrok_url: state.cloudflare_url,
+        ngrok_url: state.cloudflare_url,
+        cloudflare_url: state.cloudflare_url,
           vercel_url: state.vercel_url,
           deployment: 'vercel-website',
         });
@@ -2413,7 +2439,7 @@ export default async function handler(req, res) {
       const cfg = await loadShortenerConfig(db);
       const providers = (cfg.shorteners || []).filter((x) => x && x.url && x.api_key);
       if (!isShortenerEnabled(cfg) || !providers.length) {
-        sendHtml(res, 503, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shortener offline</title></head><body style="background:#0B0B0F;color:#fff;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><main style="max-width:420px;padding:24px"><h1>No shortener configured</h1><p>Enable shorteners in the bot with /shorteners and add at least one provider API URL + key.</p><a href="${escapeHtml(target)}" style="color:#38bdf8">Back to page</a></main></body></html>`);
+        sendHtml(res, 503, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shortener offline</title></head><body style="background:#090d18;color:#fff;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><main style="max-width:420px;padding:24px"><h1>No shortener configured</h1><p>Enable shorteners in the bot with /shorteners and add at least one provider API URL + key.</p><a href="${escapeHtml(target)}" style="color:#38bdf8">Back to page</a></main></body></html>`);
         return;
       }
       const provider = providers[Math.floor(Math.random() * providers.length)];
@@ -2457,7 +2483,7 @@ export default async function handler(req, res) {
         res.end();
       } catch (error) {
         const detail = String(error.message || error).slice(0, 220);
-        sendHtml(res, 502, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shortener error</title></head><body style="background:#0B0B0F;color:#fff;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><main style="max-width:440px;padding:24px"><h1>Shortener API failed</h1><p>${escapeHtml(detail)}</p><p>Check /shorteners provider URL (must be the API endpoint) and API key.</p><p>Example API URL: <code style="color:#38bdf8">https://shortlinkgenerator.onrender.com/api</code></p><p>You can open the key page directly:</p><a href="${escapeHtml(landing)}" style="color:#38bdf8">Open key page</a><br><br><a href="${escapeHtml(target)}" style="color:#aab7ca">Back to title</a></main></body></html>`);
+        sendHtml(res, 502, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shortener error</title></head><body style="background:#090d18;color:#fff;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><main style="max-width:440px;padding:24px"><h1>Shortener API failed</h1><p>${escapeHtml(detail)}</p><p>Check /shorteners provider URL (must be the API endpoint) and API key.</p><p>Example API URL: <code style="color:#38bdf8">https://shortlinkgenerator.onrender.com/api</code></p><p>You can open the key page directly:</p><a href="${escapeHtml(landing)}" style="color:#38bdf8">Open key page</a><br><br><a href="${escapeHtml(target)}" style="color:#aab7ca">Back to title</a></main></body></html>`);
       }
       return;
     }
@@ -2472,7 +2498,7 @@ export default async function handler(req, res) {
       let remainLabel = `${remaining}s`;
       if (remaining >= 3600) remainLabel = `${Math.floor(remaining / 3600)}h ${Math.floor((remaining % 3600) / 60)}m`;
       else if (remaining >= 60) remainLabel = `${Math.floor(remaining / 60)} minutes`;
-      sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your access key</title><style>body{background:#0B0B0F;color:white;font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;padding:20px}main{background:#16161D;padding:28px;border-radius:16px;width:min(400px,90vw);border:1px solid #2A2A36}h2{margin:0 0 8px}p{color:#aab7ca;font-size:14px}input,button,a{box-sizing:border-box;width:100%;padding:13px;margin-top:12px;border-radius:9px;font:inherit}input{background:#0b1220;color:white;border:1px solid #334155;text-align:center;font-weight:700;letter-spacing:.4px}button{background:#38bdf8;border:0;font-weight:800;color:#06111b;cursor:pointer}a{display:block;text-align:center;color:#e2e8f0;text-decoration:none;border:1px solid #334155}.hint{color:#a3e635;font-size:13px;margin-top:14px;text-align:center}</style></head><body><main><h2>✅ Your key is ready</h2><p>This key unlocks <b>all title pages</b> on the site. Copy it, then continue.</p><input id="k" readonly value="${key}"><button id="copyBtn">📋 Copy Key &amp; Continue</button><a href="${target}">Open requested page</a><p class="hint">Valid for ~${remainLabel} · works on every /title page</p></main><script>document.getElementById('copyBtn').addEventListener('click',async()=>{const field=document.getElementById('k');try{await navigator.clipboard.writeText(field.value);location.href='/key-copied/${encodeURIComponent(token)}';}catch(e){field.select();alert('Select and copy the key, then open the page.');}});</script></body></html>`);
+      sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your access key</title><style>body{background:#090d18;color:white;font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;padding:20px}main{background:#111827;padding:28px;border-radius:16px;width:min(400px,90vw);border:1px solid #263449}h2{margin:0 0 8px}p{color:#aab7ca;font-size:14px}input,button,a{box-sizing:border-box;width:100%;padding:13px;margin-top:12px;border-radius:9px;font:inherit}input{background:#0b1220;color:white;border:1px solid #334155;text-align:center;font-weight:700;letter-spacing:.4px}button{background:#38bdf8;border:0;font-weight:800;color:#06111b;cursor:pointer}a{display:block;text-align:center;color:#e2e8f0;text-decoration:none;border:1px solid #334155}.hint{color:#a3e635;font-size:13px;margin-top:14px;text-align:center}</style></head><body><main><h2>✅ Your key is ready</h2><p>This key unlocks <b>all title pages</b> on the site. Copy it, then continue.</p><input id="k" readonly value="${key}"><button id="copyBtn">📋 Copy Key &amp; Continue</button><a href="${target}">Open requested page</a><p class="hint">Valid for ~${remainLabel} · works on every /title page</p></main><script>document.getElementById('copyBtn').addEventListener('click',async()=>{const field=document.getElementById('k');try{await navigator.clipboard.writeText(field.value);location.href='/key-copied/${encodeURIComponent(token)}';}catch(e){field.select();alert('Select and copy the key, then open the page.');}});</script></body></html>`);
       return;
     }
     if (pathname.startsWith('/key-copied/') && req.method === 'GET') {
@@ -2935,14 +2961,16 @@ export default async function handler(req, res) {
           res,
           404,
           renderBaseLayout({
-            title: 'Title Not Found · AniMovieszoneflix',
+            title: 'Title Not Found · AniMoviesZoneflix',
             content: '<p class="muted" style="padding:48px 0;text-align:center">Title not found. <a href="/" style="color:var(--yellow)">Back to Home</a></p>',
           }),
         );
         return;
       }
       const page = serializeCatalogDoc(rawPage, cloudflareUrl);
-      sendHtml(res, 200, renderTitleHtml(page, cloudflareUrl));
+      const settingsState = await getSettingsState(db, req);
+      const fsUser = (settingsState.filestore_bot_username || '').trim().replace(/^@+/, '');
+      sendHtml(res, 200, renderTitleHtml(page, cloudflareUrl, fsUser));
       return;
     }
 
@@ -2964,8 +2992,8 @@ export default async function handler(req, res) {
     ) {
       if (!cloudflareUrl) {
         sendJson(res, 503, {
-          error: 'Cloudflare tunnel URL is not configured yet',
-          message: 'Wait a few seconds for the VPS Cloudflare Quick Tunnel to auto-sync to MongoDB, or set it via /baseurl.',
+          error: 'ngrok tunnel URL is not configured yet',
+          message: 'Wait a few seconds for the VPS ngrok tunnel to auto-sync to MongoDB, or set it via /baseurl.',
         });
         return;
       }
@@ -2999,7 +3027,7 @@ export default async function handler(req, res) {
     const transport = targetUrl.protocol === 'https:' ? https : http;
     const headers = {
       accept: req.headers.accept || '*/*',
-      'user-agent': req.headers['user-agent'] || 'AniMovieszoneflix-YT-Vercel-Gateway',
+      'user-agent': req.headers['user-agent'] || 'AniMoviesZoneflix-Vercel-Gateway',
       host: targetUrl.host,
       'x-forwarded-host': req.headers.host || '',
       'x-forwarded-proto': 'https',
@@ -3019,7 +3047,7 @@ export default async function handler(req, res) {
       if (!res.headersSent) {
         sendJson(res, 502, {
           error: 'Bad Gateway',
-          message: 'Could not connect to the Cloudflare tunnel backend.',
+          message: 'Could not connect to the ngrok tunnel backend.',
           detail: String(error?.message || error),
         });
       } else {

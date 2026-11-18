@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
 import html
 import logging
@@ -10,8 +11,9 @@ import secrets
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
-from wzgram import filters
+from wzgram import Client, filters
 from wzgram.enums import ParseMode
 from wzgram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery, BotCommand
 
@@ -28,14 +30,16 @@ from app.admin.auth import make_password_hash
 from app.cms import rewrite_all_stored_catalog_buttons
 from app.models.schemas import FileMetadata, User
 from app.streamer.manager import session_manager
-from app.utils.cloudflare_tunnel import _extract_tunnel_url_from_logs, apply_auto_cloudflare_url
+from app.utils.ngrok_tunnel import _extract_tunnel_url_from_logs, apply_auto_cloudflare_url
 from app.utils.helpers import (
     generate_short_code,
     format_bytes,
     is_trycloudflare_url,
     normalize_public_base_url,
+    extract_short_code_from_media_url,
+    filestore_deep_link,
 )
-from app.utils.fsub import is_user_fsubbed
+from app.utils.fsub import is_user_fsubbed, get_fsub_invite_buttons, fsub_restriction_text
 from app.utils.rate_limit import check_rate_limit
 from app.utils.media_tools import (
     cleanup_dir,
@@ -66,6 +70,462 @@ _awaiting_addgroups: dict[int, dict] = {}
 # /save restore: set of admin user_ids waiting for a backup ZIP
 _awaiting_restore: set[int] = set()
 
+# /fspanel await states: user_id -> action
+_awaiting_fspanel: dict[int, str] = {}
+
+# FileStore secondary bot (when admin sets a different bot token via /filestore)
+_filestore_client: Optional[Client] = None
+_filestore_client_token: Optional[str] = None
+_DEFAULT_FILESTORE_AUTO_DELETE_SECONDS = 5 * 60  # 5 minutes default
+
+
+async def get_runtime_admins() -> list[int]:
+    """Owner + env admins + runtime admins from MongoDB."""
+    ids = {int(settings.OWNER_ID)}
+    for a in settings.admin_list:
+        try:
+            ids.add(int(a))
+        except Exception:
+            pass
+    try:
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        for a in runtime.get("runtime_admins") or []:
+            try:
+                ids.add(int(a))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return sorted(ids)
+
+
+async def get_filestore_auto_delete_seconds() -> int:
+    """Seconds before FileStore-delivered messages are deleted (0 = disabled)."""
+    try:
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        val = runtime.get("filestore_auto_delete_seconds")
+        if val is None:
+            return _DEFAULT_FILESTORE_AUTO_DELETE_SECONDS
+        return max(0, int(val))
+    except Exception:
+        return _DEFAULT_FILESTORE_AUTO_DELETE_SECONDS
+
+
+async def get_runtime_fsub_ids() -> list[int]:
+    """Env force-sub channels + runtime fsub list from MongoDB."""
+    ids: list[int] = []
+    seen = set()
+    for cid in settings.fsub_list:
+        try:
+            i = int(cid)
+            if i not in seen:
+                ids.append(i)
+                seen.add(i)
+        except Exception:
+            pass
+    try:
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        for cid in runtime.get("runtime_fsub") or []:
+            try:
+                i = int(cid)
+                if i not in seen:
+                    ids.append(i)
+                    seen.add(i)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return ids
+
+
+async def _auto_delete_messages(client, chat_id: int, message_ids: list[int], delay: int | None = None):
+    """Delete messages after delay (runtime FileStore setting, default 5 minutes)."""
+    if delay is None:
+        delay = await get_filestore_auto_delete_seconds()
+    if not delay or delay <= 0:
+        return
+    try:
+        await asyncio.sleep(int(delay))
+        for mid in message_ids:
+            if mid is None:
+                continue
+            try:
+                await client.delete_messages(chat_id, mid)
+            except Exception:
+                pass
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.debug("auto-delete failed: %s", e)
+
+
+async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to_message: Message | None = None) -> bool:
+    """
+    Deliver the stored Telegram file to the user with Watch/Download buttons.
+    Tries multiple sources in order:
+      1) storage_chat_id / storage_message_id (log/storage channel — preferred)
+      2) chat_id / message_id (original upload message)
+      3) settings.CHANNEL_ID + storage_message_id
+      4) re-send by file_id (document/video/audio/photo)
+    Then schedules auto-delete when configured.
+    """
+    short_code = file_data.get("short_code") or ""
+    fname = file_data.get("filename") or "file"
+    file_id = (file_data.get("file_id") or "").strip()
+    mime = (file_data.get("mime_type") or "").lower()
+
+    storage_chat = file_data.get("storage_chat_id")
+    storage_msg = file_data.get("storage_message_id")
+    orig_chat = file_data.get("chat_id")
+    orig_msg = file_data.get("message_id")
+
+    # Build candidate (from_chat_id, message_id) pairs — storage first
+    candidates: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def _add(cid, mid):
+        if cid is None or mid is None:
+            return
+        try:
+            pair = (int(cid), int(mid))
+        except (TypeError, ValueError):
+            return
+        if pair not in seen:
+            seen.add(pair)
+            candidates.append(pair)
+
+    _add(storage_chat, storage_msg)
+    _add(orig_chat, orig_msg)
+    if settings.CHANNEL_ID and storage_msg is not None:
+        _add(settings.CHANNEL_ID, storage_msg)
+    if settings.CHANNEL_ID and orig_msg is not None:
+        _add(settings.CHANNEL_ID, orig_msg)
+
+    copied = None
+    last_err: Exception | None = None
+
+    for from_chat, mid in candidates:
+        try:
+            copied = await client.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat,
+                message_id=mid,
+            )
+            if copied is not None:
+                logger.info(
+                    "FileStore delivered short_code=%s via copy from %s/%s",
+                    short_code, from_chat, mid,
+                )
+                break
+        except Exception as e:
+            last_err = e
+            logger.warning(
+                "FileStore copy failed short_code=%s from %s/%s: %s",
+                short_code, from_chat, mid, e,
+            )
+            # Try forward as alternate
+            try:
+                if hasattr(client, "forward_messages"):
+                    copied = await client.forward_messages(
+                        chat_id=user_id,
+                        from_chat_id=from_chat,
+                        message_ids=mid,
+                    )
+                    # forward may return list
+                    if isinstance(copied, list):
+                        copied = copied[0] if copied else None
+                    if copied is not None:
+                        logger.info(
+                            "FileStore delivered short_code=%s via forward from %s/%s",
+                            short_code, from_chat, mid,
+                        )
+                        break
+            except Exception as e2:
+                last_err = e2
+                logger.warning(
+                    "FileStore forward failed short_code=%s from %s/%s: %s",
+                    short_code, from_chat, mid, e2,
+                )
+
+    # Last resort: send by file_id (works when this bot owns the file_id)
+    if copied is None and file_id:
+        try:
+            send_kwargs = {"chat_id": user_id, "caption": f"📂 {fname}"}
+            if mime.startswith("video/") or "video" in mime:
+                copied = await client.send_video(video=file_id, **send_kwargs)
+            elif mime.startswith("audio/") or "audio" in mime:
+                copied = await client.send_audio(audio=file_id, **send_kwargs)
+            elif mime.startswith("image/") or "photo" in mime:
+                try:
+                    copied = await client.send_photo(photo=file_id, **send_kwargs)
+                except Exception:
+                    copied = await client.send_document(document=file_id, **send_kwargs)
+            else:
+                copied = await client.send_document(document=file_id, **send_kwargs)
+            if copied is not None:
+                logger.info("FileStore delivered short_code=%s via file_id", short_code)
+        except Exception as e:
+            last_err = e
+            logger.warning("FileStore send by file_id failed short_code=%s: %s", short_code, e)
+            # one more try as document
+            try:
+                copied = await client.send_document(
+                    chat_id=user_id,
+                    document=file_id,
+                    caption=f"📂 {fname}",
+                )
+            except Exception as e3:
+                last_err = e3
+                logger.warning("FileStore document fallback failed: %s", e3)
+
+    if copied is None:
+        logger.error(
+            "FileStore delivery exhausted for short_code=%s candidates=%s last_err=%s",
+            short_code, candidates, last_err,
+        )
+        raise RuntimeError(
+            last_err or "No accessible storage for this file (set CHANNEL_ID and keep the storage message)."
+        )
+
+    button_rows = []
+    try:
+        base = await get_active_cloudflare_url()
+        if not base:
+            try:
+                base = normalize_public_base_url(settings.BASE_URL)
+            except Exception:
+                base = (settings.BASE_URL or "").rstrip("/")
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        downloads_enabled = runtime.get("downloads_enabled", True)
+        streaming_enabled = runtime.get("streaming_enabled", True)
+        fs_username = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
+
+        if streaming_enabled and base and short_code:
+            watch_url = f"{base.rstrip('/')}/watch/{short_code}"
+            button_rows.append(InlineKeyboardButton("🍿 Watch Online", url=watch_url))
+        if base and short_code:
+            if downloads_enabled:
+                dl_url = f"{base.rstrip('/')}/dl/{short_code}"
+                button_rows.append(InlineKeyboardButton("⚡ Direct Download", url=dl_url))
+            elif fs_username:
+                dl_url = filestore_deep_link(fs_username, short_code)
+                button_rows.append(InlineKeyboardButton("📥 Get File in Bot", url=dl_url))
+    except Exception as e:
+        logger.debug("Could not build filestore buttons: %s", e)
+
+    if settings.UPDATE_CHANNEL_URL:
+        button_rows.append(InlineKeyboardButton("📢 Updates Channel", url=settings.UPDATE_CHANNEL_URL))
+
+    kb = _kb([button_rows]) if button_rows else None
+    delay_sec = await get_filestore_auto_delete_seconds()
+    if delay_sec and delay_sec > 0:
+        if delay_sec % 60 == 0:
+            del_txt = f"{delay_sec // 60} minute(s)"
+        else:
+            del_txt = f"{delay_sec} second(s)"
+        auto_line = f"⏱ This message will auto-delete in **{del_txt}**.\nSave the file above before it disappears."
+    else:
+        auto_line = "Save the file from the message above."
+
+    info_msg = await client.send_message(
+        user_id,
+        f"✅ **File delivered**\n\n📂 `{html.escape(str(fname))}`\n\n{auto_line}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb,
+        reply_to_message_id=getattr(copied, "id", None) if copied else None,
+    )
+
+    ids_to_delete = []
+    if copied is not None and getattr(copied, "id", None):
+        ids_to_delete.append(copied.id)
+    if info_msg is not None and getattr(info_msg, "id", None):
+        ids_to_delete.append(info_msg.id)
+    if ids_to_delete and delay_sec and delay_sec > 0:
+        asyncio.create_task(_auto_delete_messages(client, user_id, ids_to_delete, delay_sec))
+    return True
+
+
+
+async def stop_filestore_client():
+    """Stop the secondary FileStore bot client if running."""
+    global _filestore_client, _filestore_client_token
+    client = _filestore_client
+    _filestore_client = None
+    _filestore_client_token = None
+    if client is None:
+        return
+    try:
+        if getattr(client, "is_connected", False):
+            await client.stop()
+    except Exception as e:
+        logger.warning("Error stopping filestore client: %s", e)
+
+
+async def start_filestore_client(token: str, username: str | None = None) -> dict:
+    """
+    Start a dedicated FileStore bot client with the given token so deep-link
+    /start file_<code> is handled even when the FileStore bot is not the primary bot.
+    If the token is the same as the primary bot, do nothing (primary already handles it).
+    """
+    global _filestore_client, _filestore_client_token
+    clean = (token or "").strip()
+    if not clean or ":" not in clean:
+        raise ValueError("Invalid bot token")
+
+    if clean == (settings.BOT_TOKEN or "").strip():
+        await stop_filestore_client()
+        return {"same_as_primary": True, "username": username or ""}
+
+    if _filestore_client is not None and _filestore_client_token == clean:
+        me = None
+        try:
+            me = await _filestore_client.get_me()
+        except Exception:
+            pass
+        return {
+            "same_as_primary": False,
+            "username": getattr(me, "username", None) or username or "",
+            "already_running": True,
+        }
+
+    await stop_filestore_client()
+
+    client = Client(
+        name=f"AniMoviesZoneflix_filestore_{clean.split(':', 1)[0]}",
+        api_id=settings.API_ID,
+        api_hash=settings.API_HASH,
+        bot_token=clean,
+        in_memory=True,
+        workers=16,
+        max_concurrent_transmissions=16,
+    )
+
+    @client.on_message(filters.command("start") & filters.private)
+    async def filestore_start_handler(c, message: Message):
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+        uid = user.id
+        payload = ""
+        try:
+            parts = (message.text or "").split(maxsplit=1)
+            if len(parts) > 1:
+                payload = parts[1].strip()
+        except Exception:
+            payload = ""
+        if not payload:
+            await message.reply(
+                "📦 **FileStore Bot**\n\n"
+                "Open a file deep-link from the website to receive the file here."
+            )
+            return
+        code = payload
+        if code.lower().startswith("file_"):
+            code = code[5:]
+        code = code.strip()
+        if not code:
+            return
+        file_data = await files_col.find_one({"short_code": code})
+        if not file_data:
+            await message.reply("❌ File not found or link expired.")
+            return
+        if not await is_user_fsubbed(c, uid):
+            invite_rows = await get_fsub_invite_buttons(c, uid)
+            body = await fsub_restriction_text(c, uid)
+            await message.reply(
+                body + "\n\n> Then open the download link again.",
+                reply_markup=_kb(invite_rows) if invite_rows else None,
+            )
+            return
+        try:
+            await deliver_filestore_file(c, uid, file_data, message)
+        except Exception as e:
+            logger.exception("FileStore secondary delivery failed: %s", e)
+            await message.reply("❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link.")
+
+    await client.start()
+    try:
+        me = await client.get_me()
+        resolved_username = getattr(me, "username", None) or username or ""
+    except Exception as e:
+        try:
+            await client.stop()
+        except Exception:
+            pass
+        raise RuntimeError(f"FileStore bot getMe failed: {e}") from e
+
+    # Minimal admin commands on secondary FileStore bot
+    try:
+        await client.set_bot_commands([
+            BotCommand("start", "Get file from deep link"),
+            BotCommand("fspanel", "Manage admins, fsub, auto-delete"),
+        ])
+    except Exception as e:
+        logger.debug("Could not set FileStore bot commands: %s", e)
+
+    # Register /fspanel on secondary client (reuse same logic via message routing is hard;
+    # re-bind a compact panel handler here)
+    @client.on_message(filters.command("fspanel") & filters.private)
+    async def secondary_fspanel(c, message: Message):
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+        await refresh_runtime_admin_cache()
+        if not _is_admin_user(user.id):
+            return await message.reply("🚫 Admins only.")
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        admins = await get_runtime_admins()
+        fsubs = await get_runtime_fsub_ids()
+        adel = await get_filestore_auto_delete_seconds()
+        fs_user = (runtime.get("filestore_bot_username") or resolved_username or "").strip().lstrip("@")
+        adel_txt = "off" if adel <= 0 else (f"{adel // 60} min" if adel % 60 == 0 else f"{adel} sec")
+        await message.reply(
+            "🛠 **FileStore Panel**\n\n"
+            f"> Bot: `@{fs_user}`\n"
+            f"> Auto-delete: `{adel_txt}`\n"
+            f"> Admins: {', '.join('`'+str(a)+'`' for a in admins)}\n"
+            f"> FSub IDs: {', '.join('`'+str(x)+'`' for x in fsubs) or '*(none)*'}\n\n"
+            "Use the primary bot `/fspanel` with buttons to add/remove admins, FSub channels, and auto-delete time.\n"
+            "Or send commands here:\n"
+            "• `/fspanel` — show status\n"
+            "Manage changes are stored in the shared database."
+        )
+
+    _filestore_client = client
+    _filestore_client_token = clean
+    logger.info("FileStore secondary bot started as @%s", resolved_username)
+    return {"same_as_primary": False, "username": resolved_username, "already_running": False}
+
+
+async def resolve_bot_username_from_token(token: str) -> str:
+    """Temporarily start a client to resolve public username from a bot token."""
+    clean = (token or "").strip()
+    if clean == (settings.BOT_TOKEN or "").strip():
+        try:
+            me = await session_manager.bot_client.get_me()
+            return (getattr(me, "username", None) or "").strip()
+        except Exception:
+            return ""
+
+    client = Client(
+        name=f"AniMoviesZoneflix_fs_resolve_{clean.split(':', 1)[0]}",
+        api_id=settings.API_ID,
+        api_hash=settings.API_HASH,
+        bot_token=clean,
+        in_memory=True,
+        workers=4,
+        no_updates=True,
+    )
+    await client.start()
+    try:
+        me = await client.get_me()
+        return (getattr(me, "username", None) or "").strip()
+    finally:
+        try:
+            await client.stop()
+        except Exception:
+            pass
+
 
 def get_ist_greeting():
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
@@ -82,8 +542,23 @@ def _kb(rows):
     return InlineKeyboardMarkup(rows)
 
 
+# Cached runtime admin IDs (refreshed from Mongo on panel changes / startup)
+_runtime_admin_cache: set[int] = set()
+
+
 def _is_admin_user(user_id: int) -> bool:
-    return user_id == settings.OWNER_ID or user_id in settings.admin_list
+    if user_id == settings.OWNER_ID or user_id in settings.admin_list:
+        return True
+    return int(user_id) in _runtime_admin_cache
+
+
+async def refresh_runtime_admin_cache() -> None:
+    global _runtime_admin_cache
+    try:
+        ids = await get_runtime_admins()
+        _runtime_admin_cache = set(int(x) for x in ids)
+    except Exception:
+        pass
 
 
 def extract_filename_from_caption(caption: str | None, fallback: str) -> str:
@@ -105,7 +580,7 @@ async def find_catalog_page(slug_or_title: str) -> dict | None:
     """Resolve a catalog page by slug (exact, then case-insensitive) or title fragment.
 
     Searches the bot DATABASE_NAME first, then alternate names Vercel may use
-    (tg_media_bot / file2link) so website pages are findable even if env differs slightly.
+    (tg_media_bot / animovieszoneflix) so website pages are findable even if env differs slightly.
     """
     from app.database.connection import client as mongo_client
 
@@ -117,7 +592,7 @@ async def find_catalog_page(slug_or_title: str) -> dict | None:
 
     primary_name = getattr(settings, "DATABASE_NAME", None) or "tg_media_bot"
     names = []
-    for n in (primary_name, "tg_media_bot", "file2link"):
+    for n in (primary_name, "tg_media_bot", "animovieszoneflix"):
         if n and n not in names:
             names.append(n)
 
@@ -151,7 +626,7 @@ async def catalog_page_suggestions(query: str, limit: int = 8) -> list[str]:
     seen_slugs: set[str] = set()
     primary_name = getattr(settings, "DATABASE_NAME", None) or "tg_media_bot"
     names = []
-    for n in (primary_name, "tg_media_bot", "file2link"):
+    for n in (primary_name, "tg_media_bot", "animovieszoneflix"):
         if n and n not in names:
             names.append(n)
     try:
@@ -246,8 +721,10 @@ async def setup_bot_commands(bot):
             BotCommand("manage", "Edit website pages and bot settings (admin)"),
             BotCommand("username", "Set website panel username (admin)"),
             BotCommand("password", "Set website panel password (admin)"),
-            BotCommand("backendurl", "Set backend / Cloudflare URL (admin)"),
-            BotCommand("baseurl", "Set primary / Cloudflare URL (admin)"),
+            BotCommand("backendurl", "Set backend / ngrok URL (admin)"),
+            BotCommand("baseurl", "Set primary / ngrok URL (admin)"),
+            BotCommand("filestore", "Set FileStore bot for deep-link downloads (admin)"),
+            BotCommand("fspanel", "FileStore panel: admins, fsub, auto-delete (admin)"),
             BotCommand("categories", "Manage categories (admin)"),
             BotCommand("edit", "Open page editor (admin)"),
             BotCommand("search", "Search catalog (admin)"),
@@ -447,11 +924,53 @@ def register_handlers(bot):
                 except Exception as e:
                     logger.error("Error sending new user log: %s", e)
 
+        # ── FileStore deep-link: /start <short_code> or /start file_<short_code> ──
+        # Users open t.me/Bot?start=file_CODE and receive the file + Watch/Download buttons.
+        # Messages auto-delete after 5 minutes.
+        payload = ""
+        try:
+            parts = (message.text or "").split(maxsplit=1)
+            if len(parts) > 1:
+                payload = parts[1].strip()
+        except Exception:
+            payload = ""
+        if payload:
+            code = payload
+            if code.lower().startswith("file_"):
+                code = code[5:]
+            code = code.strip()
+            if code:
+                file_data = await files_col.find_one({"short_code": code})
+                if file_data:
+                    if not await is_user_fsubbed(client, user_id):
+                        invite_rows = await get_fsub_invite_buttons(client, user_id)
+                        body = await fsub_restriction_text(client, user_id)
+                        return await message.reply(
+                            body + "\n\n> Then open the download link again.",
+                            reply_markup=_kb(invite_rows) if invite_rows else None,
+                        )
+                    try:
+                        ok = await deliver_filestore_file(client, user_id, file_data, message)
+                        if ok:
+                            return
+                        return await message.reply(
+                            "❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link."
+                        )
+                    except Exception as e:
+                        logger.exception("FileStore delivery failed for short_code=%s: %s", code, e)
+                        return await message.reply(
+                            "❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link."
+                        )
+                else:
+                    # Unknown code — fall through to normal greeting (avoid leaking existence)
+                    pass
+
         if not await is_user_fsubbed(client, user_id):
+            invite_rows = await get_fsub_invite_buttons(client, user_id)
+            body = await fsub_restriction_text(client, user_id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\n"
-                "> Join our official updates channel, then send /start again.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body + "\n\n> Then send /start again.",
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
 
         first_name = user.first_name or "User"
@@ -662,9 +1181,10 @@ def register_handlers(bot):
         runtime_cfg = await db.site_settings.find_one({"_id": "runtime"}) or {}
         downloads_enabled = runtime_cfg.get("downloads_enabled", True)
         streaming_enabled = runtime_cfg.get("streaming_enabled", True)
+        fs_configured = bool((runtime_cfg.get("filestore_bot_username") or "").strip())
         if explicit_link_request:
             downloads_enabled = streaming_enabled = True
-        if not downloads_enabled and not streaming_enabled:
+        if not downloads_enabled and not streaming_enabled and not fs_configured:
             return await message.reply("🚫 **Service Disabled**\n\n> Downloads and streaming are currently disabled by the administrator.")
         user_data = await users_col.find_one({"user_id": user.id})
         if user_data and user_data.get("is_banned"):
@@ -680,10 +1200,11 @@ def register_handlers(bot):
             )
 
         if not await is_user_fsubbed(client, user.id):
+            invite_rows = await get_fsub_invite_buttons(client, user.id)
+            body = await fsub_restriction_text(client, user.id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\n"
-                "> Join our official updates channel, then upload your file again.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body + "\n\n> Then upload your file again.",
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
 
         detecting_msg = await message.reply("⚡ **Analyzing media & preparing instant links...**")
@@ -763,15 +1284,9 @@ def register_handlers(bot):
         if log_cf:
             await apply_auto_cloudflare_url(log_cf, source="media-upload-check")
 
-        # Prefer live Cloudflare tunnel for download/watch links when available
         media_base = await get_active_cloudflare_url()
-        if not media_base and log_cf:
-            try:
-                media_base = normalize_public_base_url(log_cf)
-            except ValueError:
-                media_base = None
         if media_base:
-            base_url = media_base.rstrip("/")
+            base_url = media_base
             links_ready = True
         else:
             try:
@@ -787,13 +1302,26 @@ def register_handlers(bot):
         safe_mime = html.escape(mime_type)
 
         if links_ready:
-            download_url = f"{base_url}/dl/{short_code}" if downloads_enabled else None
+            # When downloads are disabled, replace /dl/ with FileStore deep link if configured
+            fs_username = (runtime_cfg.get("filestore_bot_username") or "").strip().lstrip("@")
+            if downloads_enabled:
+                download_url = f"{base_url}/dl/{short_code}"
+            elif fs_username:
+                download_url = f"https://t.me/{fs_username}?start=file_{short_code}"
+            else:
+                download_url = None
             stream_url = f"{base_url}/watch/{short_code}" if streaming_enabled else None
             active_links = []
             button_rows = []
-            if downloads_enabled:
-                active_links.append(f"⚡ <a href=\"{html.escape(download_url, quote=True)}\">Direct Download</a>")
-                button_rows.append(InlineKeyboardButton("⚡ Direct Download", url=download_url))
+            if download_url:
+                if downloads_enabled:
+                    label = "⚡ Direct Download"
+                    link_text = "Direct Download"
+                else:
+                    label = "📥 Get File in Bot"
+                    link_text = "Get File in Bot"
+                active_links.append(f"📥 <a href=\"{html.escape(download_url, quote=True)}\">{link_text}</a>" if not downloads_enabled else f"⚡ <a href=\"{html.escape(download_url, quote=True)}\">{link_text}</a>")
+                button_rows.append(InlineKeyboardButton(label, url=download_url))
             if streaming_enabled:
                 active_links.append(f"🍿 <a href=\"{html.escape(stream_url, quote=True)}\">Watch Online</a>")
                 button_rows.append(InlineKeyboardButton("🍿 Watch Online", url=stream_url))
@@ -814,7 +1342,7 @@ def register_handlers(bot):
                 f"📦 <b>File Size:</b> <code>{html.escape(formatted_size)}</code>\n"
                 f"⚙️ <b>MIME Type:</b> <code>{safe_mime}</code>\n\n"
                 "⚠️ <b>Public links are initializing...</b>\n"
-                "The Cloudflare Quick Tunnel URL is being auto-detected. Try again in a few seconds or use `/baseurl https://your-tunnel.trycloudflare.com`.\n\n"
+                "The ngrok tunnel URL is being auto-detected. Try again in a few seconds or use `/baseurl https://your-domain.ngrok-free.app`.\n\n"
                 f"📢 <a href=\"{html.escape(settings.UPDATE_CHANNEL_URL, quote=True)}\">Updates Channel</a>"
             )
             user_buttons = _kb([[InlineKeyboardButton("📢 Updates Channel", url=settings.UPDATE_CHANNEL_URL)], [InlineKeyboardButton("🗑️ Delete Link", callback_data=f"del_{short_code}")]])
@@ -964,16 +1492,19 @@ def register_handlers(bot):
         if not _is_admin_user(user.id) and not await check_rate_limit(user.id):
             return await message.reply("⏳ Please wait a few seconds before requesting another link.")
         if not _is_admin_user(user.id) and not await is_user_fsubbed(client, user.id):
+            invite_rows = await get_fsub_invite_buttons(client, user.id)
+            body = await fsub_restriction_text(client, user.id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\nJoin the updates channel first.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
         runtime_cfg = await db.site_settings.find_one({"_id": "runtime"}) or {}
         downloads_enabled = runtime_cfg.get("downloads_enabled", True)
         streaming_enabled = runtime_cfg.get("streaming_enabled", True)
+        fs_configured = bool((runtime_cfg.get("filestore_bot_username") or "").strip())
         if _is_admin_user(user.id):
             downloads_enabled = streaming_enabled = True
-        if not downloads_enabled and not streaming_enabled:
+        if not downloads_enabled and not streaming_enabled and not fs_configured:
             return await message.reply("🚫 Downloads and streaming are currently disabled.")
         status = await message.reply("🔎 Checking Telegram message access…")
         try:
@@ -1047,29 +1578,24 @@ def register_handlers(bot):
             if log_cf:
                 await apply_auto_cloudflare_url(log_cf, source="telegram-message-link")
             base_url = await get_active_cloudflare_url()
-            if not base_url and log_cf:
-                try:
-                    base_url = normalize_public_base_url(log_cf)
-                except ValueError:
-                    base_url = None
             if not base_url:
                 try:
                     base_url = normalize_public_base_url(settings.BASE_URL)
                 except ValueError:
                     base_url = None
             if not base_url:
-                return await status.edit_text(
-                    "⚠️ Media access is confirmed, but the public Cloudflare / backend URL is not ready yet.\n\n"
-                    "Wait a few seconds for the tunnel, or set:\n"
-                    "`/backendurl https://your-name.trycloudflare.com`"
-                )
-            base_url = str(base_url).rstrip("/")
+                return await status.edit_text("⚠️ Media access is confirmed, but the public link host is not configured yet. Set /baseurl and retry.")
 
             links, buttons = [], []
+            fs_username = (runtime_cfg.get("filestore_bot_username") or "").strip().lstrip("@")
             if downloads_enabled:
                 dl = f"{base_url}/dl/{short_code}"
                 links.append(f'⬇️ <a href="{html.escape(dl, quote=True)}">Direct Download</a>')
                 buttons.append(InlineKeyboardButton("⬇️ Download", url=dl))
+            elif fs_username:
+                dl = f"https://t.me/{fs_username}?start=file_{short_code}"
+                links.append(f'📥 <a href="{html.escape(dl, quote=True)}">Get File in Bot</a>')
+                buttons.append(InlineKeyboardButton("📥 Get File in Bot", url=dl))
             if streaming_enabled:
                 watch = f"{base_url}/watch/{short_code}"
                 links.append(f'▶️ <a href="{html.escape(watch, quote=True)}">Watch / Stream</a>')
@@ -1104,7 +1630,7 @@ def register_handlers(bot):
         if not user or user.is_bot:
             return
         if not await is_user_fsubbed(client, user.id):
-            return await callback.answer("🔒 Please join the update channel first!", show_alert=True)
+            return await callback.answer("🔒 Join the required channel(s) first, then try again.", show_alert=True)
 
         short_code = callback.data.split("_", 1)[1]
         file_data = await files_col.find_one({"short_code": short_code})
@@ -1336,7 +1862,49 @@ def register_handlers(bot):
                 pass
         return await message.reply(reply + "\n\nOpen `/panel` and sign in with your configured credentials.")
 
-    @bot.on_message(filters.command(["categories", "edit", "panel", "manage"]))
+    
+    @bot.on_message(filters.command("panel") & filters.private)
+    async def panel_command_handler(client, message: Message):
+        """Website control panel + quick FileStore panel link (admins)."""
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+        await refresh_runtime_admin_cache()
+        if not _is_admin_user(user.id):
+            return await message.reply("🚫 Admins only.")
+        try:
+            web_base = (await get_active_website_url()) or settings.BASE_URL
+            base = str(web_base or "").rstrip("/") or "https://example.com"
+        except Exception:
+            base = str(getattr(settings, "BASE_URL", "") or "").rstrip("/") or "https://example.com"
+        current_cf = (await get_active_cloudflare_url()) or "Auto-detecting..."
+        try:
+            vercel_doc = await settings_col.find_one({"key": "vercel_url"}) or {}
+            vercel_url = vercel_doc.get("value") or "Detected on first Vercel visit"
+        except Exception:
+            vercel_url = "—"
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        fs_user = (runtime.get("filestore_bot_username") or "").strip().lstrip("@") or "*(not set)*"
+        await message.reply(
+            "🔐 **AniMoviesZoneflix · Control Panel**\n\n"
+            f"> ☁️ ngrok media URL: `{current_cf}`\n"
+            f"> ▲ Vercel website: `{vercel_url}`\n"
+            f"> 📦 FileStore bot: `@{fs_user}`\n"
+            f"> 🤖 Clients: `{len(session_manager.get_all_clients())}`\n\n"
+            "**Commands**\n"
+            "• `/fspanel` — FileStore admins, FSub channels, auto-delete\n"
+            "• `/filestore @Bot` — set FileStore bot\n"
+            "• `/addbots` — helper bot tokens\n"
+            "• `/username` / `/password` — panel login\n\n"
+            "Open the website dashboard for pages, groups, and buttons.",
+            reply_markup=_kb([
+                [InlineKeyboardButton("🛠️ Open Website Panel", url=f"{base}/panel")],
+                [InlineKeyboardButton("📦 FileStore /fspanel", callback_data="fsp:open")],
+            ]),
+        )
+
+
+    @bot.on_message(filters.command(["categories", "edit", "manage"]))
     async def cms_admin_commands(client, message: Message):
         user = message.from_user
         if not user or not _is_admin_user(user.id):
@@ -1405,8 +1973,8 @@ def register_handlers(bot):
         website_urls = [u for u in website_urls if not is_trycloudflare_url(str(u))]
         website_lines = "\n".join(f"• `{url}`" for url in website_urls) or "Waiting for first Vercel visit"
         return await message.reply(
-            "🔐 **AniMovieszoneflix · Control Panel**\n\n"
-            f"> ☁️ **Auto Cloudflare Stream/Download/Button URL:** `{current_cf}`\n"
+            "🔐 **AniMoviesZoneflix · Control Panel**\n\n"
+            f"> ☁️ **Auto ngrok Stream/Download/Button URL:** `{current_cf}`\n"
             f"> ▲ **Vercel Website URL (Website Only):** `{vercel_url}`\n"
             f"> 🤖 **Active Booster Clients:** `{len(session_manager.get_all_clients())}` (use `/addbots` to add more)\n\n"
             f"**Registered Vercel website domains**\n{website_lines}\n\n"
@@ -1414,8 +1982,8 @@ def register_handlers(bot):
             "• `/username new_username` — change the website panel username\n"
             "• `/password new_password` — change the website panel password (10+ characters)\n"
             "• `/addbots` — add unlimited bot tokens to boost download speeds\n\n"
-            "The Cloudflare `trycloudflare.com` URL is auto-detected and automatically replaces all button URL domains and generates all download & stream links, while Vercel serves the website.",
-            reply_markup=_kb([[InlineKeyboardButton("Open AniMovieszoneflix Website Panel", url=f"{base}/panel")]]),
+            "The ngrok public URL is auto-detected and automatically replaces all button URL domains and generates all download & stream links, while Vercel serves the website.",
+            reply_markup=_kb([[InlineKeyboardButton("Open AniMoviesZoneflix Website Panel", url=f"{base}/panel")]]),
         )
 
     @bot.on_message(filters.command("backendurl"))
@@ -1427,30 +1995,26 @@ def register_handlers(bot):
         current = (await get_active_cloudflare_url()) or settings.BACKEND_URL or "Auto-detecting"
         if len(args) < 2:
             return await message.reply(
-                "☁️ **Backend / Stream URL**\n\n"
-                f"> Current active URL: `{current}`\n\n"
-                "Usage:\n"
-                "• Permanent: `/backendurl https://dl.yourdomain.com`\n"
-                "• Temporary: `/backendurl https://name.trycloudflare.com`\n\n"
-                "A **permanent** domain (Named Tunnel or any fixed HTTPS host) keeps `/dl/` and `/stream/` links working forever. "
-                "Quick Tunnel URLs change when the tunnel restarts and will not overwrite a permanent domain."
+                "☁️ **ngrok Tunnel URL**\n\n"
+                f"> Current Auto ngrok URL: `{current}`\n\n"
+                "Usage: `/backendurl https://your-domain.ngrok-free.app`\n"
+                "This URL is auto-detected by the VPS and automatically used for all download links, stream links, and button URLs."
             )
         candidate = args[1].strip()
         try:
             candidate = normalize_public_base_url(candidate)
             now = datetime.datetime.utcnow()
-            permanent = not is_trycloudflare_url(candidate)
             await settings_col.update_one(
                 {"key": "backend_url"},
                 {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
                 upsert=True,
             )
-            if permanent:
-                await settings_col.update_one(
-                    {"key": "permanent_backend_url"},
-                    {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
-                    upsert=True,
-                )
+            await settings_col.update_one(
+                {"key": "cloudflare_url"},
+                {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
+                upsert=True,
+            )
+            if is_trycloudflare_url(candidate) or settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(settings.BASE_URL):
                 await settings_col.update_one(
                     {"key": "base_url"},
                     {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
@@ -1458,30 +2022,13 @@ def register_handlers(bot):
                 )
                 settings.BASE_URL = candidate
                 os.environ["BASE_URL"] = candidate
-            else:
-                await settings_col.update_one(
-                    {"key": "cloudflare_url"},
-                    {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
-                    upsert=True,
-                )
-                if settings.BASE_URL.startswith(("http://localhost", "http://127.0.0.1")) or is_trycloudflare_url(settings.BASE_URL):
-                    await settings_col.update_one(
-                        {"key": "base_url"},
-                        {"$set": {"value": candidate, "updated_by": user.id, "updated_at": now}},
-                        upsert=True,
-                    )
-                    settings.BASE_URL = candidate
-                    os.environ["BASE_URL"] = candidate
             settings.BACKEND_URL = candidate
-            os.environ["BACKEND_URL"] = candidate
             rewritten = await rewrite_all_stored_catalog_buttons(candidate)
-            mode = "permanent (links will not rotate)" if permanent else "temporary Quick Tunnel"
             await message.reply(
-                "✅ **Backend URL Saved & Synced!**\n\n"
-                f"> 🔗 **URL:** `{candidate}`\n"
-                f"> 📌 **Mode:** `{mode}`\n"
+                "✅ **ngrok URL Saved & Synced!**\n\n"
+                f"> ☁️ **ngrok URL:** `{candidate}`\n"
                 f"> 🔄 **Catalog Pages Rewritten:** `{rewritten}`\n\n"
-                "All download links (`/dl/`), stream links (`/watch/`, `/stream/`), and website button URLs now use this host."
+                "All download links (`/dl/`), stream links (`/watch/`, `/stream/`), and website button URLs now use this ngrok URL."
             )
         except ValueError as exc:
             await message.reply(f"❌ Invalid backend URL: `{html.escape(str(exc))}`")
@@ -1503,13 +2050,10 @@ def register_handlers(bot):
         if len(args) < 2:
             current_cf = (await get_active_cloudflare_url()) or settings.BASE_URL
             return await message.reply(
-                "🌐 **Base / Stream URL Management**\n\n"
-                f"> 🔗 **Current active URL:** `{current_cf}`\n"
+                "🌐 **ngrok / Base URL Management**\n\n"
+                f"> 🔗 **Current Active ngrok URL:** `{current_cf}`\n"
                 f"> 📢 **Updates Channel:** `{settings.UPDATE_CHANNEL_URL}`\n\n"
-                "Set a **permanent** domain so `/dl/` and `/stream/` links never break:\n"
-                "`/baseurl https://dl.yourdomain.com`\n\n"
-                "Temporary Quick Tunnel (changes on restart):\n"
-                "`/baseurl https://name.trycloudflare.com`"
+                "*(ngrok URL is set automatically on startup, or override with `/baseurl https://your-ngrok-domain.ngrok-free.app`)*"
             )
         new_url = args[1].strip()
         try:
@@ -1518,12 +2062,10 @@ def register_handlers(bot):
             return await message.reply(
                 "❌ **Invalid public Base URL**\n\n"
                 f"> {html.escape(str(exc))}\n\n"
-                "Example permanent: `/baseurl https://dl.yourdomain.com`\n"
-                "Example temporary: `/baseurl https://name.trycloudflare.com`"
+                "Use your public URL, for example: `/baseurl https://your-ngrok-domain.ngrok-free.app`"
             )
         try:
             now = datetime.datetime.utcnow()
-            permanent = not is_trycloudflare_url(new_url)
             await settings_col.update_one(
                 {"key": "base_url"},
                 {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
@@ -1532,22 +2074,7 @@ def register_handlers(bot):
             settings.BASE_URL = new_url
             os.environ["BASE_URL"] = new_url
             rewritten = 0
-            if permanent:
-                # Fixed domain: mark as permanent so Quick Tunnel can never rotate links
-                settings.BACKEND_URL = new_url
-                os.environ["BACKEND_URL"] = new_url
-                await settings_col.update_one(
-                    {"key": "backend_url"},
-                    {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
-                    upsert=True,
-                )
-                await settings_col.update_one(
-                    {"key": "permanent_backend_url"},
-                    {"$set": {"value": new_url, "updated_by": user.id, "updated_at": now}},
-                    upsert=True,
-                )
-                rewritten = await rewrite_all_stored_catalog_buttons(new_url)
-            elif is_trycloudflare_url(new_url) or not settings.BACKEND_URL or is_trycloudflare_url(settings.BACKEND_URL):
+            if is_trycloudflare_url(new_url) or not settings.BACKEND_URL or is_trycloudflare_url(settings.BACKEND_URL):
                 settings.BACKEND_URL = new_url
                 await settings_col.update_one(
                     {"key": "backend_url"},
@@ -1566,19 +2093,420 @@ def register_handlers(bot):
                     {"$addToSet": {"value": new_url}, "$set": {"updated_at": now}},
                     upsert=True,
                 )
-            mode = "permanent (links will not rotate)" if permanent else "temporary / other"
             await message.reply(
                 "🌐 **Base URL Updated Successfully!**\n\n"
                 f"> 🔗 **New URL:** `{new_url}`\n"
-                f"> 📌 **Mode:** `{mode}`\n"
                 f"> 🔄 **Catalog Pages Rewritten:** `{rewritten}`\n"
                 f"> 👤 **Updated By:** `{user.id}`\n\n"
-                "✨ *Download and stream links now use this host.*"
+                "✨ *All download links, stream links, and website button URLs now use this ngrok URL.*"
             )
         except Exception as e:
             logger.error("Error updating baseurl: %s", e)
             await message.reply(f"❌ **Error updating Base URL:** `{e}`")
 
+    @bot.on_message(filters.command("filestore") & filters.private)
+    async def filestore_handler(client, message: Message):
+        """Configure FileStore bot for deep-link file delivery.
+
+        Usage:
+          /filestore                        → show current setting
+          /filestore @BotUsername           → set by username
+          /filestore BotUsername            → same (without @)
+          /filestore <bot_token>            → set by token, resolve username, start that bot
+          /filestore off                    → clear / disable
+        """
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+        if not _is_admin_user(user.id):
+            return await message.reply(
+                "🚫 **Unauthorized Access**\n\n"
+                "> Only authorized bot administrators can configure FileStore."
+            )
+
+        args = (message.text or "").split(maxsplit=1)
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        current = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
+        has_token = bool((runtime.get("filestore_bot_token") or "").strip())
+
+        if len(args) < 2:
+            status = f"@{current}" if current else "*(not set)*"
+            token_note = " · token stored & bot started" if has_token else ""
+            return await message.reply(
+                "📦 **FileStore Bot**\n\n"
+                f"> Current: `{status}`{token_note}\n\n"
+                "Deep links look like:\n"
+                f"`https://t.me/{current or 'YourBot'}?start=file_<code>`\n\n"
+                "When a user opens that link, the FileStore bot sends the file in chat "
+                "with **Watch** + **Download** buttons, then **auto-deletes after 5 minutes**.\n\n"
+                "On title pages that have a **Watch** box, a matching **Telegram** box is "
+                "generated automatically — same group/button names, but URLs become deep links "
+                "(only for buttons whose URLs are this bot’s `/watch/` links).\n\n"
+                "**Commands**\n"
+                "• `/filestore @YourBotUsername` — set by username\n"
+                "• `/filestore <bot_token>` — set by token, resolve username, **start** that bot\n"
+                "• `/filestore off` — clear setting and stop secondary bot\n\n"
+                "Tip: you can use the *same* bot (this one). Deep links with "
+                "`/start file_<short_code>` are handled automatically."
+            )
+
+        value = args[1].strip()
+        if value.lower() in ("off", "none", "disable", "clear", "0"):
+            await stop_filestore_client()
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$unset": {"filestore_bot_username": "", "filestore_bot_token": ""},
+                 "$set": {"updated_at": datetime.datetime.utcnow()}},
+                upsert=True,
+            )
+            return await message.reply("✅ FileStore cleared. Deep-links disabled; secondary bot stopped.")
+
+        username = value
+        token = None
+        started_note = ""
+
+        # Bot token form: 123456:ABC...
+        if ":" in value and value.split(":", 1)[0].isdigit() and re.fullmatch(
+            r"\d{6,16}:[A-Za-z0-9_-]{30,60}", value.strip()
+        ):
+            token = value.strip()
+            status_msg = await message.reply("⏳ Resolving bot token and starting FileStore bot…")
+            try:
+                resolved = await resolve_bot_username_from_token(token)
+                if not resolved:
+                    # Fall back: if token is primary bot, use primary username
+                    if token == (settings.BOT_TOKEN or "").strip():
+                        me = await client.get_me()
+                        resolved = (getattr(me, "username", None) or current or "").strip()
+                if not resolved:
+                    return await status_msg.edit_text(
+                        "❌ Could not resolve a public username from that token.\n"
+                        "Make sure the bot has a @username set in @BotFather.\n"
+                        "Or use: `/filestore @YourBotUsername`"
+                    )
+                username = resolved
+                start_info = await start_filestore_client(token, username=username)
+                if start_info.get("same_as_primary"):
+                    started_note = "\n> Using **this bot** (primary) for deep-link delivery."
+                elif start_info.get("already_running"):
+                    started_note = f"\n> Secondary FileStore bot **@{(start_info.get('username') or username)}** already running."
+                else:
+                    started_note = f"\n> Secondary FileStore bot **@{username}** started and listening for deep links."
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.exception("FileStore token setup failed: %s", e)
+                return await status_msg.edit_text(
+                    f"❌ Failed to start FileStore bot from token:\n`{html.escape(str(e))}`"
+                )
+        else:
+            username = username.lstrip("@").strip()
+
+        username = username.lstrip("@").strip()
+        if not username or not re.match(r"^[A-Za-z0-9_]{5,32}$", username):
+            return await message.reply(
+                "❌ Invalid bot username.\n"
+                "Use: `/filestore @YourBotUsername`\n"
+                "Or: `/filestore <bot_token>`"
+            )
+
+        update = {
+            "filestore_bot_username": username,
+            "updated_at": datetime.datetime.utcnow(),
+        }
+        if token:
+            update["filestore_bot_token"] = token
+        await db.site_settings.update_one(
+            {"_id": "runtime"},
+            {"$set": update},
+            upsert=True,
+        )
+        await message.reply(
+            "✅ **FileStore saved**\n\n"
+            f"> Bot: `@{username}`{started_note}\n\n"
+            "Deep links:\n"
+            f"`https://t.me/{username}?start=file_<short_code>`\n\n"
+            "• Title pages with a **Watch** box get a matching **Telegram** box "
+            "(same group/button names; only buttons whose URLs are this bot’s `/watch/` links).\n"
+            "• Delivered files include **Watch** + **Download** buttons and **auto-delete in 5 minutes**."
+        )
+
+
+    async def _fspanel_home_text() -> tuple[str, InlineKeyboardMarkup]:
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        admins = await get_runtime_admins()
+        fsubs = await get_runtime_fsub_ids()
+        adel = await get_filestore_auto_delete_seconds()
+        fs_user = (runtime.get("filestore_bot_username") or "").strip().lstrip("@") or "*(not set)*"
+        if adel <= 0:
+            adel_txt = "off"
+        elif adel % 60 == 0:
+            adel_txt = f"{adel // 60} min"
+        else:
+            adel_txt = f"{adel} sec"
+        admin_lines = ", ".join(f"`{a}`" for a in admins) or "*(none)*"
+        fsub_lines = ", ".join(f"`{c}`" for c in fsubs) or "*(none)*"
+        text = (
+            "🛠 **FileStore Panel** (admins only)\n\n"
+            f"> 📦 FileStore bot: `@{fs_user}`\n"
+            f"> ⏱ Auto-delete: `{adel_txt}`\n"
+            f"> 👑 Admins: {admin_lines}\n"
+            f"> 📢 FSub channels/groups: {fsub_lines}\n\n"
+            "Use the buttons below to manage settings."
+        )
+        kb = _kb([
+            [InlineKeyboardButton("➕ Add Admin", callback_data="fsp:addadmin"),
+             InlineKeyboardButton("➖ Remove Admin", callback_data="fsp:deladmin")],
+            [InlineKeyboardButton("🔄 Replace Admins", callback_data="fsp:setadmins")],
+            [InlineKeyboardButton("➕ Add FSub", callback_data="fsp:addfsub"),
+             InlineKeyboardButton("➖ Remove FSub", callback_data="fsp:delfsub")],
+            [InlineKeyboardButton("🔄 Replace FSub list", callback_data="fsp:setfsub")],
+            [InlineKeyboardButton("⏱ Auto-delete time", callback_data="fsp:autodel")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data="fsp:refresh")],
+        ])
+        return text, kb
+
+
+    @bot.on_callback_query(filters.regex(r"^fsub:check$"))
+    async def fsub_try_again_callback(client, callback: CallbackQuery):
+        """Try Again after joining force-sub channels."""
+        user = callback.from_user
+        if not user or user.is_bot:
+            return
+        ok = await is_user_fsubbed(client, user.id)
+        if ok:
+            try:
+                await callback.answer("✅ Verified! You can use the bot now.", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await callback.message.edit_text(
+                    "✅ **Access granted**\n\n"
+                    "> You joined all required channels.\n"
+                    "> Send /start or open your download link again."
+                )
+            except Exception:
+                await callback.message.reply(
+                    "✅ **Access granted**\n\n"
+                    "> You joined all required channels.\n"
+                    "> Send /start or open your download link again."
+                )
+            return
+        invite_rows = await get_fsub_invite_buttons(client, user.id)
+        body = await fsub_restriction_text(client, user.id)
+        try:
+            await callback.answer("Still missing a channel — join all, then Try Again.", show_alert=True)
+        except Exception:
+            pass
+        try:
+            await callback.message.edit_text(
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
+            )
+        except Exception:
+            await callback.message.reply(
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
+            )
+
+    @bot.on_message(filters.command("fspanel") & filters.private)
+    async def fspanel_handler(client, message: Message):
+        """FileStore management panel: admins, fsub, auto-delete (admin only)."""
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+        await refresh_runtime_admin_cache()
+        if not _is_admin_user(user.id):
+            return await message.reply("🚫 Admins only.")
+        text, kb = await _fspanel_home_text()
+        await message.reply(text, reply_markup=kb)
+
+    @bot.on_callback_query(filters.regex(r"^fsp:"))
+    async def fspanel_callback(client, callback: CallbackQuery):
+        user = callback.from_user
+        if not user:
+            return
+        await refresh_runtime_admin_cache()
+        if not _is_admin_user(user.id):
+            return await callback.answer("Admins only", show_alert=True)
+        data = (callback.data or "").split(":", 1)[-1]
+        if data in ("refresh", "open"):
+            text, kb = await _fspanel_home_text()
+            try:
+                if data == "open":
+                    await callback.message.reply(text, reply_markup=kb)
+                else:
+                    await callback.message.edit_text(text, reply_markup=kb)
+            except Exception:
+                await callback.message.reply(text, reply_markup=kb)
+            return await callback.answer("FileStore panel" if data == "open" else "Refreshed")
+        prompts = {
+            "addadmin": ("Send the **user ID** to add as admin (numbers only).", "addadmin"),
+            "deladmin": ("Send the **user ID** to remove from admins.", "deladmin"),
+            "setadmins": ("Send admin user IDs separated by comma or space (replaces runtime list).\nOwner is always kept.", "setadmins"),
+            "addfsub": ("Send the **channel/group ID** to add for force-subscribe\n(e.g. `-1001234567890`). Bot must be admin there.", "addfsub"),
+            "delfsub": ("Send the **channel/group ID** to remove from FSub.", "delfsub"),
+            "setfsub": ("Send channel/group IDs separated by comma or space (replaces runtime FSub list).", "setfsub"),
+            "autodel": ("Send auto-delete time for FileStore deliveries:\n`5m` · `10m` · `1h` · `300` (seconds) · `off`", "autodel"),
+        }
+        if data not in prompts:
+            return await callback.answer("Unknown action", show_alert=True)
+        prompt, state = prompts[data]
+        _awaiting_fspanel[user.id] = state
+        await callback.answer()
+        await callback.message.reply(f"✏️ {prompt}\n\nSend /cancel to abort.")
+
+    @bot.on_message(filters.private & filters.text & ~filters.command(["start", "cancel", "fspanel", "panel", "filestore"]))
+    async def fspanel_text_input(client, message: Message):
+        user = message.from_user
+        if not user or user.id not in _awaiting_fspanel:
+            return
+        if not _is_admin_user(user.id):
+            _awaiting_fspanel.pop(user.id, None)
+            return
+        state = _awaiting_fspanel.pop(user.id, None)
+        raw = (message.text or "").strip()
+        if not raw or raw.lower() in ("/cancel", "cancel"):
+            return await message.reply("Cancelled.")
+
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
+        now = datetime.datetime.utcnow()
+
+        def parse_ids(s: str) -> list[int]:
+            out = []
+            for part in re.split(r"[\s,;]+", s.strip()):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    out.append(int(part))
+                except ValueError:
+                    continue
+            return out
+
+        if state == "addadmin":
+            ids = parse_ids(raw)
+            if not ids:
+                return await message.reply("❌ Send a valid numeric user ID.")
+            cur = list(runtime.get("runtime_admins") or [])
+            for i in ids:
+                if i not in cur:
+                    cur.append(i)
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_admins": cur, "updated_at": now}},
+                upsert=True,
+            )
+            await refresh_runtime_admin_cache()
+            return await message.reply(f"✅ Added admin(s): {', '.join(str(i) for i in ids)}")
+
+        if state == "deladmin":
+            ids = set(parse_ids(raw))
+            if not ids:
+                return await message.reply("❌ Send a valid numeric user ID.")
+            if settings.OWNER_ID in ids:
+                return await message.reply("❌ Cannot remove the owner.")
+            cur = [i for i in (runtime.get("runtime_admins") or []) if int(i) not in ids]
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_admins": cur, "updated_at": now}},
+                upsert=True,
+            )
+            await refresh_runtime_admin_cache()
+            return await message.reply(f"✅ Removed admin(s): {', '.join(str(i) for i in ids)}")
+
+        if state == "setadmins":
+            ids = parse_ids(raw)
+            # keep owner always
+            cleaned = []
+            seen = set()
+            for i in ids:
+                if i == settings.OWNER_ID:
+                    continue
+                if i not in seen:
+                    cleaned.append(i)
+                    seen.add(i)
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_admins": cleaned, "updated_at": now}},
+                upsert=True,
+            )
+            await refresh_runtime_admin_cache()
+            return await message.reply(f"✅ Runtime admins replaced ({len(cleaned)} + owner).")
+
+        if state == "addfsub":
+            ids = parse_ids(raw)
+            if not ids:
+                return await message.reply("❌ Send a valid channel/group ID (e.g. `-1001234567890`).")
+            cur = list(runtime.get("runtime_fsub") or [])
+            for i in ids:
+                if i not in cur:
+                    cur.append(i)
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_fsub": cur, "updated_at": now}},
+                upsert=True,
+            )
+            return await message.reply(
+                f"✅ FSub added: {', '.join(str(i) for i in ids)}\n"
+                "Make sure the bot is **admin** in those chats and can invite users."
+            )
+
+        if state == "delfsub":
+            ids = set(parse_ids(raw))
+            if not ids:
+                return await message.reply("❌ Send a valid channel/group ID.")
+            cur = [i for i in (runtime.get("runtime_fsub") or []) if int(i) not in ids]
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_fsub": cur, "updated_at": now}},
+                upsert=True,
+            )
+            return await message.reply(f"✅ FSub removed: {', '.join(str(i) for i in ids)}")
+
+        if state == "setfsub":
+            ids = parse_ids(raw)
+            cleaned = []
+            seen = set()
+            for i in ids:
+                if i not in seen:
+                    cleaned.append(i)
+                    seen.add(i)
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"runtime_fsub": cleaned, "updated_at": now}},
+                upsert=True,
+            )
+            return await message.reply(f"✅ FSub list replaced ({len(cleaned)} chats).")
+
+        if state == "autodel":
+            v = raw.lower().strip()
+            if v in ("off", "0", "disable", "none"):
+                seconds = 0
+            else:
+                m = re.match(r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)?$", v)
+                if not m:
+                    return await message.reply("❌ Invalid time. Examples: `5m`, `10m`, `1h`, `300`, `off`")
+                num = int(m.group(1))
+                unit = (m.group(2) or "s").lower()
+                if unit.startswith("h"):
+                    seconds = num * 3600
+                elif unit.startswith("m"):
+                    seconds = num * 60
+                else:
+                    seconds = num
+            await db.site_settings.update_one(
+                {"_id": "runtime"},
+                {"$set": {"filestore_auto_delete_seconds": seconds, "updated_at": now}},
+                upsert=True,
+            )
+            if seconds <= 0:
+                return await message.reply("✅ FileStore auto-delete **disabled**.")
+            return await message.reply(f"✅ FileStore auto-delete set to **{seconds} seconds**.")
+
+    
     @bot.on_message(filters.command("stats"))
     async def stats_handler(client, message: Message):
         user = message.from_user
@@ -1709,7 +2637,7 @@ def register_handlers(bot):
             return await message.reply(
                 "📌 **Usage**\n"
                 "• Reply to a `/title/...` page link with `/addgroups`\n"
-                "• Or: `/addgroups https://hitler-yt.vercel.app/title/slug`\n"
+                "• Or: `/addgroups https://AniMoviesZoneflix-yt.vercel.app/title/slug`\n"
                 "• Or: `/addgroups slug-name`\n\n"
                 f"**Recent pages:**\n{tip}"
             )
@@ -1719,7 +2647,7 @@ def register_handlers(bot):
             suggestions = await catalog_page_suggestions(page_slug, limit=8)
             tip = "\n".join(suggestions) if suggestions else (
                 "_No matching pages. Check `DATABASE_NAME` matches the Vercel MongoDB "
-                "(often `tg_media_bot` or `file2link`), and that the page was published._"
+                "(often `tg_media_bot` or `animovieszoneflix`), and that the page was published._"
             )
             return await message.reply(
                 f"❌ Catalog page `{page_slug}` not found in the bot database.\n\n"
@@ -2177,9 +3105,13 @@ def register_handlers(bot):
                     f"📦 Size: {size_str}\n\n"
                     f"🔗 Generated Links\n\n"
                 )
+                fs_username = (runtime_cfg.get("filestore_bot_username") or "").strip().lstrip("@")
                 if downloads_enabled:
                     dl = f"{base_url}/dl/{short_code}"
                     block += f"⬇️ Direct Download: <code>{html.escape(dl)}</code>\n\n"
+                elif fs_username:
+                    dl = f"https://t.me/{fs_username}?start=file_{short_code}"
+                    block += f"📥 Get File in Bot: <code>{html.escape(dl)}</code>\n\n"
                 if streaming_enabled:
                     watch = f"{base_url}/watch/{short_code}"
                     block += f"▶️ Watch / Stream: <code>{html.escape(watch)}</code>\n"
@@ -2224,9 +3156,11 @@ def register_handlers(bot):
         if not _is_admin_user(user.id) and not await is_access_allowed(user.id):
             return await message.reply("🔒 This bot is restricted by the administrator.")
         if not await is_user_fsubbed(client, user.id):
+            invite_rows = await get_fsub_invite_buttons(client, user.id)
+            body = await fsub_restriction_text(client, user.id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\n> Join the updates channel first.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
         target = message.reply_to_message
         if not target or not _is_media_message(target):
@@ -2263,9 +3197,11 @@ def register_handlers(bot):
         if not _is_admin_user(user.id) and not await is_access_allowed(user.id):
             return await message.reply("🔒 This bot is restricted by the administrator.")
         if not await is_user_fsubbed(client, user.id):
+            invite_rows = await get_fsub_invite_buttons(client, user.id)
+            body = await fsub_restriction_text(client, user.id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\n> Join the updates channel first.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
         target = message.reply_to_message
         if not target or not _is_media_message(target):
@@ -2408,9 +3344,11 @@ def register_handlers(bot):
         if not _is_admin_user(user.id) and not await is_access_allowed(user.id):
             return await message.reply("🔒 This bot is restricted by the administrator.")
         if not await is_user_fsubbed(client, user.id):
+            invite_rows = await get_fsub_invite_buttons(client, user.id)
+            body = await fsub_restriction_text(client, user.id)
             return await message.reply(
-                "🔒 **Access Restricted**\n\n> Join the updates channel first.",
-                reply_markup=_kb([[InlineKeyboardButton("📢 Join Updates Channel", url=settings.UPDATE_CHANNEL_URL)]]),
+                body,
+                reply_markup=_kb(invite_rows) if invite_rows else None,
             )
         target = message.reply_to_message
         args = (message.text or "").split(maxsplit=1)

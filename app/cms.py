@@ -37,6 +37,7 @@ class SettingsUpdate(BaseModel):
     backend_url: str | None = Field(default=None, max_length=500)
     base_url: str | None = Field(default=None, max_length=500)
     cloudflare_url: str | None = Field(default=None, max_length=500)
+    filestore_bot_username: str | None = Field(default=None, max_length=64)
 
 
 class CategoryInput(BaseModel):
@@ -123,7 +124,7 @@ def serialize_catalog_doc(doc: dict, cloudflare_base: str | None = None) -> dict
 
 
 async def rewrite_all_stored_catalog_buttons(cloudflare_base: str | None) -> int:
-    """Update all stored button URLs in catalog_pages so their domain uses the active Cloudflare try URL."""
+    """Update all stored button URLs in catalog_pages so their domain uses the active ngrok URL."""
     if not cloudflare_base:
         return 0
     try:
@@ -147,7 +148,7 @@ async def rewrite_all_stored_catalog_buttons(cloudflare_base: str | None) -> int
 async def get_settings():
     doc = await site_settings.find_one({'_id': 'runtime'}) or {}
     rows = await settings_col.find(
-        {'key': {'$in': ['base_url', 'backend_url', 'cloudflare_url', 'vercel_url', 'website_urls']}},
+        {'key': {'$in': ['base_url', 'backend_url', 'ngrok_url', 'cloudflare_url', 'vercel_url', 'website_urls']}},
         {'key': 1, 'value': 1},
     ).to_list(10)
     urls = {x['key']: x.get('value', '') for x in rows if isinstance(x, dict) and 'key' in x}
@@ -157,14 +158,17 @@ async def get_settings():
     if not isinstance(website_urls, list):
         website_urls = [str(website_urls)] if website_urls else []
     website_urls = [u for u in website_urls if not is_trycloudflare_url(str(u))]
+    fs_user = (doc.get('filestore_bot_username') or '').strip().lstrip('@')
     return {
         'downloads_enabled': doc.get('downloads_enabled', True),
         'streaming_enabled': doc.get('streaming_enabled', True),
         'built_in_player_enabled': doc.get('built_in_player_enabled', True),
         'auto_player_redirect': doc.get('auto_player_redirect', False),
         'access_mode': doc.get('access_mode', 'all'),
+        'filestore_bot_username': fs_user,
         'base_url': cf_url or urls.get('base_url') or settings.BASE_URL,
         'backend_url': cf_url or urls.get('backend_url') or (settings.BACKEND_URL or ''),
+        'ngrok_url': cf_url,
         'cloudflare_url': cf_url,
         'vercel_url': urls.get('vercel_url') or os.getenv('WEBSITE_URL', '') or (web_url if not is_trycloudflare_url(web_url) else ''),
         'website_urls': website_urls,
@@ -307,6 +311,58 @@ async def search_page(
     )
 
 
+def build_telegram_groups_from_watch(groups: list | None, filestore_username: str | None) -> list[dict]:
+    """
+    Mirror Watch-box groups into one Telegram box.
+    Only /watch/<code> button URLs become FileStore deep links.
+    Dedupes by short_code so the same media is not listed twice.
+    """
+    if not filestore_username or not groups:
+        return []
+    uname = str(filestore_username).strip().lstrip('@')
+    if not uname:
+        return []
+    from app.utils.helpers import extract_watch_short_code, filestore_deep_link
+
+    out = []
+    seen_codes_global: set[str] = set()
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        box = str(g.get('box') or 'watch').strip().lower()
+        # Watch box only (legacy missing box counts as watch)
+        if box not in ('watch', ''):
+            continue
+        buttons_out = []
+        seen_in_group: set[str] = set()
+        for b in (g.get('buttons') or []):
+            if not isinstance(b, dict):
+                continue
+            bname = str(b.get('name') or '').strip()
+            burl = str(b.get('url') or '').strip()
+            if not bname or not burl:
+                continue
+            code = extract_watch_short_code(burl)
+            if not code:
+                continue
+            if code in seen_in_group or code in seen_codes_global:
+                continue
+            seen_in_group.add(code)
+            seen_codes_global.add(code)
+            buttons_out.append({
+                'name': bname,
+                'url': filestore_deep_link(uname, code),
+            })
+        if buttons_out:
+            gname = str(g.get('name') or '').strip() or 'Watch'
+            out.append({
+                'box': 'telegram',
+                'name': gname,
+                'buttons': buttons_out,
+            })
+    return out
+
+
 @router.get('/title/{slug}', response_class=HTMLResponse)
 async def title_page(request: Request, slug: str):
     raw_page = await pages.find_one({'slug': slug, 'published': True}, {'_id': 0})
@@ -314,6 +370,9 @@ async def title_page(request: Request, slug: str):
         raise HTTPException(404, 'Title not found')
     cf_base = await get_active_cloudflare_url() or settings.BASE_URL.rstrip('/')
     page = serialize_catalog_doc(raw_page, cf_base)
+    settings_doc = await get_settings()
+    fs_user = (settings_doc.get('filestore_bot_username') or '').strip().lstrip('@')
+    telegram_groups = build_telegram_groups_from_watch(page.get('groups') or [], fs_user) if fs_user else []
     return templates.TemplateResponse(
         request=request,
         name='title.html',
@@ -321,6 +380,8 @@ async def title_page(request: Request, slug: str):
             'request': request,
             'page': page,
             'cloudflare_url': cf_base,
+            'filestore_bot_username': fs_user,
+            'telegram_groups': telegram_groups,
         },
     )
 

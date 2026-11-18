@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Admin Panel · HITLER YT{% endblock %}
+{% block title %}Admin Panel · AniMoviesZoneflix{% endblock %}
 {% block head %}
 <style>
   .admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
@@ -28,7 +28,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<h1>HITLER YT · Control Center</h1>
+<h1>AniMoviesZoneflix · Control Center</h1>
 <p class="muted">Manage website and playback settings. Changes are saved to MongoDB.</p>
 
 <div class="admin-grid">
@@ -49,16 +49,16 @@
   </section>
 
   <section class="card admin-card">
-    <h2>🌐 Website & Cloudflare Tunnel URLs</h2>
-    <label class="field-label">Cloudflare Try URL (Download, Stream & Button Links)</label>
-    <input id="base-url" type="url" placeholder="https://name.trycloudflare.com">
-    <label class="field-label">Backend Tunnel URL (Cloudflare → VPS)</label>
-    <input id="backend-url" type="url" placeholder="https://name.trycloudflare.com">
+    <h2>🌐 Website & ngrok Tunnel URLs</h2>
+    <label class="field-label">ngrok URL (Download, Stream & Button Links)</label>
+    <input id="base-url" type="url" placeholder="https://your-ngrok-domain.ngrok-free.app">
+    <label class="field-label">Backend Tunnel URL (ngrok → VPS)</label>
+    <input id="backend-url" type="url" placeholder="https://your-ngrok-domain.ngrok-free.app">
     <label class="field-label">Vercel Website URL (Catalog Website)</label>
     <input id="vercel-url" type="url" readonly placeholder="Detected on first Vercel visit">
     <small class="muted" id="website-urls"></small>
     <button class="btn accent" type="button" onclick="saveUrls()" style="margin-top:8px;width:100%">Save & Rewrite Button URLs</button>
-    <p id="url-status" class="muted" style="margin-top:6px">All download links, stream links, and title-page button URLs automatically use your Cloudflare trycloudflare.com URL.</p>
+    <p id="url-status" class="muted" style="margin-top:6px">All download links, stream links, and title-page button URLs automatically use your ngrok URL.</p>
   </section>
 
   <section class="card admin-card">
@@ -188,7 +188,7 @@ async function saveUrls() {
     document.getElementById('vercel-url').value = d.vercel_url || '';
     document.getElementById('website-urls').textContent =
       'Registered Vercel Website URLs: ' + ((d.website_urls || []).join(' · ') || 'Waiting for first Vercel visit');
-    box.textContent = 'Saved to MongoDB! Download links, stream links, and title-page button URLs now use this Cloudflare URL.';
+    box.textContent = 'Saved to MongoDB! Download links, stream links, and title-page button URLs now use this ngrok URL.';
     if (document.getElementById('page-select').value) {
       await loadPageEditor();
     }
@@ -608,7 +608,7 @@ async function savePageEditor() {
       }),
     });
     await loadPageEditor();
-    document.getElementById('edit-status').textContent = '✅ Saved to shared MongoDB! Watch & Download groups and Cloudflare button URLs are now live.';
+    document.getElementById('edit-status').textContent = '✅ Saved to shared MongoDB! Watch & Download groups and ngrok button URLs are now live.';
   } catch (e) {
     document.getElementById('edit-status').textContent = '❌ Save failed: ' + e.message;
   }
