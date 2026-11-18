@@ -1099,6 +1099,10 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
     .groups-pager .pg-jump label{color:var(--muted);font-size:12px}
     .groups-pager .pg-jump input{width:64px;background:var(--bg);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 10px;font:600 13px var(--font);text-align:center}
     .groups-pager .pg-jump button{background:var(--accent);border:0;color:#0b0c10;border-radius:8px;padding:8px 12px;font:700 13px var(--font);cursor:pointer}
+    .auto-open-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;margin:12px 0 0;border-radius:14px;background:linear-gradient(135deg,rgba(255,106,0,.12),rgba(37,99,235,.1));border:1px solid rgba(255,106,0,.28);color:var(--text)}
+    .auto-open-banner .spinner{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:#ff6a00;animation:title-spin .7s linear infinite}
+    @keyframes title-spin{to{transform:rotate(360deg)}}
+    .auto-open-banner a{color:#ffb36f;font-weight:700}
     @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}}
   </style>`;
 
@@ -1121,8 +1125,8 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
             const buttons = Array.isArray(group.buttons) ? group.buttons : [];
             const btnsHtml = buttons
               .map(
-                (btn) =>
-                  `<a class="btn-yellow cf-media-btn" href="${escapeHtml(btn.url || '#')}" data-raw-url="${escapeHtml(btn.url || '#')}" rel="noopener" target="_blank">${escapeHtml(btn.name || 'Link')}</a>`,
+                (btn, bi) =>
+                  `<a class="btn-yellow cf-media-btn${boxKey === 'watch' ? ' watch-btn' : ''}" href="${escapeHtml(btn.url || '#')}" data-raw-url="${escapeHtml(btn.url || '#')}" data-group-index="${idx}" data-button-index="${bi}" rel="noopener"${boxKey === 'watch' ? '' : ' target="_blank"'}>${escapeHtml(btn.name || 'Link')}</a>`,
               )
               .join('');
             return `<div class="group-block" data-group-index="${idx}">
@@ -1154,7 +1158,6 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
     })
     .join('');
 
-  // Telegram box for existing + new pages (only when FileStore is configured)
   const tgGroups = buildTelegramGroupsFromWatch(allGroups, filestoreUsername);
   let telegramHtml = '';
   if (tgGroups.length) {
@@ -1188,6 +1191,19 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
       </section>`;
   }
 
+  const watchBoxGroups = allGroups.filter((g) => (g?.box || 'watch') === 'watch');
+  const hasFirstWatch = watchBoxGroups.some((g) => Array.isArray(g.buttons) && g.buttons[0] && g.buttons[0].url);
+  const autoBanner = hasFirstWatch
+    ? `<div class="auto-open-banner" id="autoOpenBanner">
+      <div class="spinner" aria-hidden="true"></div>
+      <div>
+        <strong>Opening built-in player…</strong>
+        <div class="muted" style="font-size:12px;margin-top:2px">First Watch group · first quality</div>
+      </div>
+      <a href="#" id="manualWatchLink">Open manually</a>
+    </div>`
+    : '';
+
   const genresHtml =
     Array.isArray(page.genres) && page.genres.length
       ? `<div class="meta">${page.genres.map((g) => `<span>${escapeHtml(g)}</span>`).join('')}</div>`
@@ -1207,48 +1223,89 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
     ${genresHtml}
     ${page.imdb_id ? `<p class="muted" style="margin-top:8px">IMDb: ${escapeHtml(page.imdb_id)}</p>` : ''}
     ${page.tagline ? `<p style="margin-top:8px"><em>${escapeHtml(page.tagline)}</em></p>` : ''}
+    ${autoBanner}
     ${boxesHtml}
     ${telegramHtml}
   </div>
 </article>
 <script>
-(async () => {
-  let cfBase = ${safeJsonForScript(cloudflareUrl || '')};
-  function rewriteToCloudflare(rawHref, baseOrigin) {
-    if (!rawHref || !baseOrigin) return rawHref;
-    const cleanBase = String(baseOrigin).trim().replace(/\\/+$/, '');
-    if (!cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) return rawHref;
-    if (rawHref.startsWith('/')) return cleanBase + rawHref;
+(function(){
+  const TITLE_SLUG = ${safeJsonForScript(page.slug || '')};
+  function extractWatchCode(url) {
+    if (!url) return null;
     try {
-      const u = new URL(rawHref, window.location.origin);
-      const cf = new URL(cleanBase);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
-        u.protocol = cf.protocol;
-        u.host = cf.host;
-        return u.toString();
+      const m = String(url).match(/(?:^|\\/)watch\\/([A-Za-z0-9_-]{3,64})(?:\\/|$|\\?|#)/i);
+      return m ? m[1] : null;
+    } catch (_) { return null; }
+  }
+  function buildWatchHref(rawUrl, groupIndex, buttonIndex) {
+    const code = extractWatchCode(rawUrl);
+    if (!code) return rawUrl;
+    const params = new URLSearchParams();
+    if (TITLE_SLUG) params.set('title', TITLE_SLUG);
+    params.set('g', String(groupIndex || 0));
+    params.set('b', String(buttonIndex || 0));
+    return '/watch/' + code + '?' + params.toString();
+  }
+  document.querySelectorAll('a.watch-btn').forEach(a => {
+    const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
+    const gi = parseInt(a.getAttribute('data-group-index') || '0', 10) || 0;
+    const bi = parseInt(a.getAttribute('data-button-index') || '0', 10) || 0;
+    const href = buildWatchHref(raw, gi, bi);
+    a.setAttribute('href', href);
+    a.removeAttribute('target');
+  });
+  (async () => {
+    let cfBase = ${safeJsonForScript(cloudflareUrl || '')};
+    function rewriteToCloudflare(rawHref, baseOrigin) {
+      if (!rawHref || !baseOrigin) return rawHref;
+      const cleanBase = String(baseOrigin).trim().replace(/\\/+$/, '');
+      if (!cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) return rawHref;
+      if (rawHref.startsWith('/')) return cleanBase + rawHref;
+      try {
+        const u = new URL(rawHref, window.location.origin);
+        const cf = new URL(cleanBase);
+        if (u.protocol === 'http:' || u.protocol === 'https:') {
+          u.protocol = cf.protocol;
+          u.host = cf.host;
+          return u.toString();
+        }
+      } catch (_) {}
+      return rawHref;
+    }
+    function applyCloudflareButtons(baseOrigin) {
+      if (!baseOrigin) return;
+      document.querySelectorAll('a.cf-media-btn:not(.watch-btn)').forEach(a => {
+        const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
+        const updated = rewriteToCloudflare(raw, baseOrigin);
+        if (updated) a.setAttribute('href', updated);
+      });
+    }
+    if (cfBase) applyCloudflareButtons(cfBase);
+    try {
+      const r = await fetch('/api/site-settings', { cache: 'no-store' });
+      if (r.ok) {
+        const s = await r.json();
+        const latestCf = s.cloudflare_url || s.backend_url || cfBase;
+        if (latestCf) applyCloudflareButtons(latestCf);
       }
     } catch (_) {}
-    return rawHref;
-  }
-  function applyCloudflareButtons(baseOrigin) {
-    if (!baseOrigin) return;
-    document.querySelectorAll('a.cf-media-btn').forEach(a => {
-      const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
-      const updated = rewriteToCloudflare(raw, baseOrigin);
-      if (updated) a.setAttribute('href', updated);
-    });
-  }
-  if (cfBase) applyCloudflareButtons(cfBase);
-  try {
-    const r = await fetch('/api/site-settings', { cache: 'no-store' });
-    if (r.ok) {
-      const s = await r.json();
-      const latestCf = s.cloudflare_url || s.backend_url || cfBase;
-      if (latestCf) applyCloudflareButtons(latestCf);
+  })();
+  const firstBtn = document.querySelector('a.watch-btn[data-group-index="0"][data-button-index="0"]')
+    || document.querySelector('a.watch-btn');
+  if (firstBtn) {
+    const dest = firstBtn.getAttribute('href');
+    const manual = document.getElementById('manualWatchLink');
+    if (manual) manual.setAttribute('href', dest);
+    const params = new URLSearchParams(window.location.search);
+    const skip = params.get('stay') === '1' || params.get('noredir') === '1';
+    if (!skip && dest) {
+      setTimeout(function(){ window.location.replace(dest); }, 350);
+    } else {
+      const banner = document.getElementById('autoOpenBanner');
+      if (banner) banner.style.display = 'none';
     }
-  } catch (_) {}
-})();
-(function(){
+  }
   var PER=5;
   function setupBox(boxKey){
     var list=document.querySelector('.groups-list[data-box="'+boxKey+'"]');
@@ -1977,60 +2034,143 @@ loadUrls();
   });
 }
 
-function renderWatchHtml(file, settings, streamBaseUrl) {
+function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   const cfOrigin = validPublicUrl(streamBaseUrl) || settings.cloudflare_url || settings.backend_url || settings.base_url || '';
   const sizeMb = file.file_size ? (Number(file.file_size) / (1024 * 1024)).toFixed(2) : '0.00';
-  const dlHref = cfOrigin ? `${cfOrigin}/dl/${encodeURIComponent(file.short_code)}` : `/dl/${encodeURIComponent(file.short_code)}`;
+  const downloadsEnabled = settings.downloads_enabled !== false;
+  const fsUser = String(extra.filestoreUsername || settings.filestore_bot_username || '').replace(/^@+/, '');
+  const dlHref = downloadsEnabled
+    ? (cfOrigin ? `${cfOrigin}/dl/${encodeURIComponent(file.short_code)}` : `/dl/${encodeURIComponent(file.short_code)}`)
+    : (fsUser ? `https://t.me/${fsUser}?start=file_${encodeURIComponent(file.short_code)}` : (cfOrigin ? `${cfOrigin}/dl/${encodeURIComponent(file.short_code)}` : `/dl/${encodeURIComponent(file.short_code)}`));
+
+  const watchGroups = Array.isArray(extra.watchGroups) ? extra.watchGroups : [];
+  const groupIndex = Number.isFinite(extra.groupIndex) ? Math.max(0, extra.groupIndex) : 0;
+  const buttonIndex = Number.isFinite(extra.buttonIndex) ? Math.max(0, extra.buttonIndex) : 0;
+  const titleSlug = String(extra.titleSlug || '');
+  const posterUrl = String(extra.posterUrl || '');
+  const groupName = (watchGroups[groupIndex] && watchGroups[groupIndex].name) || '';
 
   const headExtra = `<style>
     ${!settings.built_in_player_enabled ? '.player-shell,.card.info{display:none!important}' : ''}
     ${!settings.streaming_enabled ? '.player-shell{display:none!important}' : ''}
-    .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(59,130,246,.18)}
+    .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(255,106,0,.18)}
     .player-box{background:#000;border-radius:18px;overflow:hidden;position:relative;z-index:1}
-    video{display:block;width:100%;max-height:72vh;background:#000;aspect-ratio:16/9}
+    .player-wrapper{width:100%;aspect-ratio:16/9;position:relative;background:#000}
+    .player-wrapper video{width:100%;height:100%;background:#000;object-fit:contain;display:block}
+    .player-chrome-btn{position:absolute;z-index:9;width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(6,6,12,.82);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(8px);padding:0;line-height:0}
+    .player-chrome-btn:hover{background:rgba(255,106,0,.25);border-color:rgba(255,106,0,.55)}
+    .player-chrome-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    .pc-switch{top:12px;left:12px}.pc-laptop{top:12px;right:56px}.pc-download{top:12px;right:12px}
+    .player-pop{position:absolute;z-index:12;min-width:160px;max-width:min(280px,86vw);background:rgba(10,10,20,.96);border:1px solid rgba(255,106,0,.35);border-radius:14px;padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.55);display:none;flex-direction:column;gap:4px}
+    .player-pop.open{display:flex}
+    .player-pop.switch-pop{top:56px;left:12px}.player-pop.laptop-pop{top:56px;right:12px}
+    .player-pop button,.player-pop a{display:block;width:100%;text-align:left;border:0;background:transparent;color:#f5f5f5;padding:10px 12px;border-radius:10px;font:600 13px system-ui;cursor:pointer;text-decoration:none}
+    .player-pop button:hover,.player-pop a:hover{background:rgba(255,106,0,.18)}
+    .player-pop .pop-title{font-size:11px;color:#9ca3af;padding:4px 12px 6px;text-transform:uppercase;letter-spacing:.06em}
+    .nav-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .nav-row .nav-btn{background:linear-gradient(180deg,#14142c,#0e0e20);border:1px solid #2a2a3a;color:#fff;border-radius:12px;padding:10px 16px;font:700 13px system-ui;cursor:pointer}
+    .nav-row .nav-btn:disabled{opacity:.4;cursor:not-allowed}
+    .nav-row .nav-spacer{flex:1}
+    .nav-row .tg-btn{background:linear-gradient(135deg,#0ea5e9,#2563eb);border:0;color:#fff;border-radius:12px;padding:10px 16px;font:700 13px system-ui;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     .info{padding:18px 16px}
     .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;color:var(--muted);font-size:13px}
-    .meta span{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);padding:3px 10px;border-radius:20px;font-size:12px}
+    .meta span{background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.2);padding:3px 10px;border-radius:20px;font-size:12px}
     .tools{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
-    .player-panel{display:none}.player-panel.active{display:block}
+    .player-panel{display:block}
     .player-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
-    .pbtn{min-height:46px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#14142c,#0e0e20);color:#fff;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;cursor:pointer;font-size:13px}
+    .pbtn{min-height:46px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#14142c,#0e0e20);color:#fff;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;cursor:pointer;font-size:13px;text-decoration:none}
     .copy-ok{font-size:12px;color:#69e69a;min-height:18px;margin-top:6px}
     .filename{font-weight:700;word-break:break-word;font-size:16px}
     .side .card{padding:16px}
+    .related-groups{margin-top:18px}
+    .related-groups h3{font-size:15px;margin:0 0 12px;color:#fff}
+    .related-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+    .related-card{display:block;text-decoration:none;color:inherit;border-radius:14px;overflow:hidden;border:1px solid #2a2a3a;background:#0c0c18}
+    .related-card.active{border-color:#ff6a00;box-shadow:0 0 0 1px rgba(255,106,0,.35)}
+    .related-card .thumb{aspect-ratio:16/9;background:#000 center/cover no-repeat;position:relative}
+    .related-card .thumb::after{content:"▶";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);font-size:22px}
+    .related-card .meta-line{padding:8px 10px;font-size:12px;font-weight:600;line-height:1.3}
+    .related-pager{display:flex;align-items:center;gap:8px;margin-top:12px;justify-content:center}
+    .related-pager button{background:#12122a;border:1px solid #2a2a3a;color:#fff;border-radius:8px;padding:8px 12px;font:600 13px system-ui;cursor:pointer}
+    .related-pager button:disabled{opacity:.4;cursor:not-allowed}
+    .related-pager span{color:#9ca3af;font-size:13px}
+    .notice{padding:11px 13px;border-radius:11px;background:rgba(59,130,246,.06);border:1px solid rgba(255,106,0,.18);color:var(--muted);font-size:12px;margin-top:12px}
     @media(min-width:900px){.watch-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.side{align-self:start;position:sticky;top:72px}}
   </style>`;
+
+  const relatedSection = watchGroups.length
+    ? `<div class="related-groups card" style="margin-top:14px;padding:16px">
+      <h3>Episodes / groups</h3>
+      <div class="related-grid" id="relatedGrid"></div>
+      <div class="related-pager" id="relatedPager" hidden>
+        <button type="button" id="relPrev">←</button>
+        <span id="relInfo">1 / 1</span>
+        <button type="button" id="relNext">→</button>
+      </div>
+    </div>`
+    : '';
+
+  const tgBtn = fsUser
+    ? `<a class="tg-btn" id="tgFileBtn" href="https://t.me/${escapeHtml(fsUser)}?start=file_${escapeHtml(file.short_code)}" target="_blank" rel="noopener">✈ Telegram</a>`
+    : '';
 
   const content = `
 <div class="watch-grid">
   <section>
     <div class="player-shell">
       <div class="player-box">
-        <video id="player" controls playsinline preload="auto" crossorigin="anonymous">
-          <source id="video-source" src="" type="video/mp4">
-          Your browser cannot play this media.
-        </video>
+        <div class="player-wrapper" id="playerWrapper">
+          <video id="player" controls playsinline preload="auto" crossorigin="anonymous">
+            <source id="video-source" src="" type="video/mp4">
+            Your browser cannot play this media.
+          </video>
+          <button type="button" class="player-chrome-btn pc-switch" id="pcSwitchBtn" title="Switch quality / source" aria-label="Switch source">
+            <svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+          </button>
+          <button type="button" class="player-chrome-btn pc-laptop" id="pcLaptopBtn" title="Open in external player" aria-label="External players">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/><path d="M8 20v-2h8v2"/></svg>
+          </button>
+          <button type="button" class="player-chrome-btn pc-download" id="pcDownloadBtn" title="Download" aria-label="Download">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+          </button>
+          <div class="player-pop switch-pop" id="switchPop" role="menu">
+            <div class="pop-title">This group</div>
+            <div id="switchPopList"></div>
+          </div>
+          <div class="player-pop laptop-pop" id="laptopPop" role="menu">
+            <div class="pop-title">Open in player</div>
+            <div id="laptopPopList"></div>
+          </div>
+        </div>
       </div>
+    </div>
+    <div class="nav-row" id="groupNavRow">
+      <button type="button" class="nav-btn" id="prevGroupBtn" disabled>← Prev</button>
+      <button type="button" class="nav-btn" id="nextGroupBtn" disabled>Next →</button>
+      <span class="nav-spacer"></span>
+      ${tgBtn}
     </div>
     <div class="card info" style="margin-top:12px">
       <div class="filename">${escapeHtml(file.filename || 'Media')}</div>
       <div class="meta">
         <span>${escapeHtml(sizeMb)} MB</span>
         <span>${escapeHtml(file.access_count || 0)} views</span>
+        ${groupName ? `<span id="groupLabel">${escapeHtml(groupName)}</span>` : ''}
       </div>
       <div class="tools">
-        ${settings.downloads_enabled ? `<a class="btn accent" id="direct-dl-btn" href="${escapeHtml(dlHref)}" download>⬇ Download (Chrome)</a><a class="btn" id="idm-dl-btn" href="#">⚡ 1DM Download</a>` : ''}
+        <a class="btn accent" id="direct-dl-btn" href="${escapeHtml(dlHref)}" ${downloadsEnabled ? 'download' : 'target="_blank" rel="noopener"'}>⬇ Download</a>
         <button class="btn" type="button" onclick="copyDownload()">Copy Download Link</button>
         <button class="btn" type="button" onclick="copyStream()">Copy Stream URL</button>
       </div>
       <div id="copy-status" class="copy-ok"></div>
     </div>
+    ${relatedSection}
   </section>
   <aside class="side">
     <div class="card">
-      <b>Open in player / downloader</b>
-      <p class="muted" style="font-size:12px;margin:6px 0 14px">Android buttons use explicit VIEW intents via your ngrok URL.</p>
+      <b>Open in player</b>
       <div id="mobile" class="player-panel active"><div class="player-grid" id="mobile-grid"></div></div>
+      <div class="notice">MX Player, PLAYit, VLC, and Download. If a player does not open, use <b>Copy Download Link</b> or <b>Copy Stream URL</b>.</div>
     </div>
   </aside>
 </div>
@@ -2038,31 +2178,32 @@ function renderWatchHtml(file, settings, streamBaseUrl) {
 const SHORT_CODE = ${safeJsonForScript(file.short_code)};
 const STREAM_ORIGIN = (${safeJsonForScript(cfOrigin)} || window.location.origin).replace(/\\/+$/, '');
 const STREAM_URL = STREAM_ORIGIN + '/stream/' + SHORT_CODE;
-const DL_URL = STREAM_ORIGIN + '/dl/' + SHORT_CODE;
+const DOWNLOADS_ENABLED = ${safeJsonForScript(downloadsEnabled)};
+const FILESTORE_BOT = ${safeJsonForScript(fsUser)};
+const DL_URL = DOWNLOADS_ENABLED
+  ? (STREAM_ORIGIN + '/dl/' + SHORT_CODE)
+  : (FILESTORE_BOT ? ('https://t.me/' + FILESTORE_BOT + '?start=file_' + SHORT_CODE) : (STREAM_ORIGIN + '/dl/' + SHORT_CODE));
 const PLAYER_MIME = ${safeJsonForScript(file.mime_type || 'video/mp4')};
 const INTENT_MIME = (!PLAYER_MIME || PLAYER_MIME === 'application/octet-stream') ? 'video/*' : PLAYER_MIME;
+const WATCH_GROUPS = ${safeJsonForScript(watchGroups)};
+const TITLE_SLUG = ${safeJsonForScript(titleSlug)};
+const GROUP_INDEX = ${safeJsonForScript(groupIndex)};
+const BUTTON_INDEX = ${safeJsonForScript(buttonIndex)};
+const POSTER_URL = ${safeJsonForScript(posterUrl)};
+const FILESTORE_USER = ${safeJsonForScript(fsUser)};
+
 const player = document.getElementById('player');
 if (player) {
   player.src = STREAM_URL;
   player.load();
 }
-function idmIntent(url) {
-  const u = new URL(url);
-  const scheme = u.protocol.replace(':','');
-  return 'intent://' + u.host + u.pathname + u.search + '#Intent;scheme=' + scheme + ';action=android.intent.action.VIEW;package=idm.internet.download.manager;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
-}
 const dlBtn = document.getElementById('direct-dl-btn');
 if (dlBtn) dlBtn.href = DL_URL;
-const idmBtn = document.getElementById('idm-dl-btn');
-if (idmBtn) idmBtn.href = idmIntent(DL_URL);
+
 function androidIntent(url, pkg, mime) {
   const u = new URL(url);
   const scheme = u.protocol.replace(':','');
   return 'intent://' + u.host + u.pathname + u.search + '#Intent;scheme=' + scheme + ';action=android.intent.action.VIEW;type=' + (mime || 'video/*') + ';package=' + pkg + ';S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
-}
-function hvStreamIntent(url) {
-  const encoded = encodeURIComponent(url);
-  return 'intent://play?url=' + encoded + '#Intent;scheme=hvstream;package=com.hvstreamplayer.app;S.browser_fallback_url=' + encoded + ';end';
 }
 function addPlayer(gridId, label, href) {
   const a = document.createElement('a');
@@ -2072,9 +2213,166 @@ function addPlayer(gridId, label, href) {
   if (!href.startsWith('intent:')) { a.target = '_blank'; a.rel = 'noopener'; }
   document.getElementById(gridId)?.appendChild(a);
 }
-[['1DM Download', 'idm'],['HV Stream', null],['PLAYit', 'com.playit.videoplayer'],['VLC', 'org.videolan.vlc'],['MX Player', 'com.mxtech.videoplayer.ad'],['Just Player', 'com.brouken.player']].forEach(([n, p]) => {
-  addPlayer('mobile-grid', n, p === 'idm' ? idmIntent(DL_URL) : (n === 'HV Stream' ? hvStreamIntent(STREAM_URL) : androidIntent(STREAM_URL, p, INTENT_MIME)));
+addPlayer('mobile-grid', 'MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME));
+addPlayer('mobile-grid', 'PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME));
+addPlayer('mobile-grid', 'VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME));
+addPlayer('mobile-grid', 'Download', DL_URL);
+
+function extractWatchCode(url) {
+  if (!url) return null;
+  try {
+    const m = String(url).match(/(?:^|\\/)watch\\/([A-Za-z0-9_-]{3,64})(?:\\/|$|\\?|#)/i);
+    return m ? m[1] : null;
+  } catch (_) { return null; }
+}
+function watchHrefFor(groupIdx, buttonIdx) {
+  const g = WATCH_GROUPS[groupIdx];
+  if (!g || !g.buttons || !g.buttons[buttonIdx]) return null;
+  const code = extractWatchCode(g.buttons[buttonIdx].url);
+  if (!code) return g.buttons[buttonIdx].url;
+  const params = new URLSearchParams();
+  if (TITLE_SLUG) params.set('title', TITLE_SLUG);
+  params.set('g', String(groupIdx));
+  params.set('b', String(buttonIdx));
+  return '/watch/' + code + '?' + params.toString();
+}
+function goToGroupButton(groupIdx, buttonIdx) {
+  const href = watchHrefFor(groupIdx, buttonIdx);
+  if (href) window.location.href = href;
+}
+
+(function setupSwitchPop() {
+  const btn = document.getElementById('pcSwitchBtn');
+  const pop = document.getElementById('switchPop');
+  const list = document.getElementById('switchPopList');
+  if (!btn || !pop || !list) return;
+  const g = WATCH_GROUPS[GROUP_INDEX];
+  if (!g || !g.buttons || !g.buttons.length) { btn.style.display = 'none'; return; }
+  list.innerHTML = '';
+  g.buttons.forEach((b, i) => {
+    const a = document.createElement('button');
+    a.type = 'button';
+    a.textContent = (b.name || ('Source ' + (i + 1))) + (i === BUTTON_INDEX ? ' ✓' : '');
+    a.addEventListener('click', () => {
+      pop.classList.remove('open');
+      if (i !== BUTTON_INDEX) goToGroupButton(GROUP_INDEX, i);
+    });
+    list.appendChild(a);
+  });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('laptopPop')?.classList.remove('open');
+    pop.classList.toggle('open');
+  });
+})();
+
+(function setupLaptopPop() {
+  const btn = document.getElementById('pcLaptopBtn');
+  const pop = document.getElementById('laptopPop');
+  const list = document.getElementById('laptopPopList');
+  if (!btn || !pop || !list) return;
+  const items = [
+    ['MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME)],
+    ['PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME)],
+    ['VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME)],
+  ];
+  list.innerHTML = '';
+  items.forEach(([label, href]) => {
+    const a = document.createElement('a');
+    a.href = href;
+    a.textContent = label;
+    list.appendChild(a);
+  });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('switchPop')?.classList.remove('open');
+    pop.classList.toggle('open');
+  });
+})();
+
+(function setupDownloadBtn() {
+  const btn = document.getElementById('pcDownloadBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = DL_URL;
+    a.setAttribute('download', '');
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+})();
+
+document.addEventListener('click', () => {
+  document.getElementById('switchPop')?.classList.remove('open');
+  document.getElementById('laptopPop')?.classList.remove('open');
 });
+
+(function setupGroupNav() {
+  const prev = document.getElementById('prevGroupBtn');
+  const next = document.getElementById('nextGroupBtn');
+  if (!WATCH_GROUPS.length) {
+    if (prev) prev.disabled = true;
+    if (next) next.disabled = true;
+    return;
+  }
+  if (prev) {
+    prev.disabled = GROUP_INDEX <= 0;
+    prev.addEventListener('click', () => { if (GROUP_INDEX > 0) goToGroupButton(GROUP_INDEX - 1, 0); });
+  }
+  if (next) {
+    next.disabled = GROUP_INDEX >= WATCH_GROUPS.length - 1;
+    next.addEventListener('click', () => { if (GROUP_INDEX < WATCH_GROUPS.length - 1) goToGroupButton(GROUP_INDEX + 1, 0); });
+  }
+})();
+
+(function setupRelated() {
+  const grid = document.getElementById('relatedGrid');
+  const pager = document.getElementById('relatedPager');
+  if (!grid || !WATCH_GROUPS.length) return;
+  const PER = 8;
+  let page = Math.floor(GROUP_INDEX / PER) + 1;
+  const max = Math.max(1, Math.ceil(WATCH_GROUPS.length / PER));
+  function render() {
+    grid.innerHTML = '';
+    const start = (page - 1) * PER;
+    WATCH_GROUPS.slice(start, start + PER).forEach((g, localIdx) => {
+      const idx = start + localIdx;
+      const first = (g.buttons && g.buttons[0]) || null;
+      if (!first) return;
+      const href = watchHrefFor(idx, 0) || first.url;
+      const card = document.createElement('a');
+      card.className = 'related-card' + (idx === GROUP_INDEX ? ' active' : '');
+      card.href = href;
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      if (POSTER_URL) thumb.style.backgroundImage = 'url("' + String(POSTER_URL).replace(/"/g, '\\\\"') + '")';
+      const meta = document.createElement('div');
+      meta.className = 'meta-line';
+      meta.textContent = g.name || ('Group ' + (idx + 1));
+      card.appendChild(thumb);
+      card.appendChild(meta);
+      grid.appendChild(card);
+    });
+    if (pager) {
+      if (max <= 1) pager.hidden = true;
+      else {
+        pager.hidden = false;
+        const info = document.getElementById('relInfo');
+        if (info) info.textContent = page + ' / ' + max;
+        const rp = document.getElementById('relPrev');
+        const rn = document.getElementById('relNext');
+        if (rp) rp.disabled = page <= 1;
+        if (rn) rn.disabled = page >= max;
+      }
+    }
+  }
+  document.getElementById('relPrev')?.addEventListener('click', () => { if (page > 1) { page--; render(); } });
+  document.getElementById('relNext')?.addEventListener('click', () => { if (page < max) { page++; render(); } });
+  render();
+})();
+
 async function copyStream() {
   try {
     await navigator.clipboard.writeText(STREAM_URL);
@@ -2086,7 +2384,7 @@ async function copyStream() {
 async function copyDownload() {
   try {
     await navigator.clipboard.writeText(DL_URL);
-    document.getElementById('copy-status').textContent = 'Download link copied (paste in Chrome or 1DM).';
+    document.getElementById('copy-status').textContent = 'Download link copied.';
   } catch (e) {
     window.prompt('Copy download URL:', DL_URL);
   }
@@ -3003,18 +3301,73 @@ export default async function handler(req, res) {
     }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/watch/')) {
-      const shortCode = decodeURIComponent(pathname.slice('/watch/'.length));
-      if (cloudflareUrl && !isVercelUrl(cloudflareUrl)) {
-        res.writeHead(307, { Location: `${cloudflareUrl}${requestPath}` });
-        res.end();
-        return;
-      }
+      // Keep query string separate from short code (e.g. /watch/CODE?title=slug&g=0&b=0)
+      let shortCodeRaw = pathname.slice('/watch/'.length);
+      if (shortCodeRaw.includes('/')) shortCodeRaw = shortCodeRaw.split('/')[0];
+      const shortCode = decodeURIComponent(shortCodeRaw);
       const fileData = await db.collection('files').findOne({ short_code: shortCode });
       if (!fileData) {
         sendJson(res, 404, { detail: 'Link not found' });
         return;
       }
-      sendHtml(res, 200, renderWatchHtml(fileData, state, cloudflareUrl));
+
+      // Title context for prev/next, switch, related groups (works on Vercel website)
+      const titleSlug = String(url.searchParams.get('title') || '').trim();
+      let groupIndex = parseInt(url.searchParams.get('g') || '0', 10);
+      let buttonIndex = parseInt(url.searchParams.get('b') || '0', 10);
+      if (!Number.isFinite(groupIndex) || groupIndex < 0) groupIndex = 0;
+      if (!Number.isFinite(buttonIndex) || buttonIndex < 0) buttonIndex = 0;
+
+      let watchGroups = [];
+      let posterUrl = '';
+      if (titleSlug) {
+        try {
+          const rawPage = await db.collection('catalog_pages').findOne({ slug: titleSlug, published: true });
+          if (rawPage) {
+            const page = serializeCatalogDoc(rawPage, cloudflareUrl || '');
+            posterUrl = pagePosterPath(page.poster_path || '');
+            const allGroups = Array.isArray(page.groups) ? page.groups : [];
+            for (const g of allGroups) {
+              const box = String((g && g.box) || 'watch').trim().toLowerCase();
+              if (box && box !== 'watch') continue;
+              const buttons = [];
+              for (const btn of (g && g.buttons) || []) {
+                if (!btn || typeof btn !== 'object') continue;
+                const u = String(btn.url || '').trim();
+                const name = String(btn.name || 'Watch').trim() || 'Watch';
+                if (u) buttons.push({ name, url: u });
+              }
+              if (buttons.length) {
+                watchGroups.push({
+                  name: String((g && g.name) || 'Watch Group').trim() || 'Watch Group',
+                  buttons,
+                });
+              }
+            }
+            if (groupIndex >= watchGroups.length) groupIndex = 0;
+            if (watchGroups[groupIndex] && buttonIndex >= (watchGroups[groupIndex].buttons || []).length) {
+              buttonIndex = 0;
+            }
+          }
+        } catch (e) {
+          console.warn('watch title context failed', e);
+        }
+      }
+
+      const fsUser = String(state.filestore_bot_username || '').replace(/^@+/, '');
+      // Render watch HTML on Vercel; stream/dl still use cloudflare/backend origin in the page.
+      sendHtml(
+        res,
+        200,
+        renderWatchHtml(fileData, state, cloudflareUrl, {
+          titleSlug,
+          groupIndex,
+          buttonIndex,
+          watchGroups,
+          posterUrl,
+          filestoreUsername: fsUser,
+        }),
+      );
       return;
     }
 
