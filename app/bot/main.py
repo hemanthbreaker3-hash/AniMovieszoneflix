@@ -2978,238 +2978,287 @@ def register_handlers(bot):
 
     @bot.on_message(filters.command("batch") & filters.private)
     async def batch_command(client, message: Message):
+        """Generate download/watch links for a range of messages in any channel/group
+        the bot can access. Does NOT require CHANNEL_ID / storage channel for generation.
+        """
         user = message.from_user
         if not user or not _is_admin_user(user.id):
             return await message.reply("🚫 Admins only.")
+
         text = (message.text or message.caption or "").strip()
-
-        # Robust link pattern: tolerates ?single / query params / trailing junk
-        link_re = re.compile(
-            r"https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s]*)?",
-            re.I,
-        )
-        # Also support compact range: .../START-END or .../START-.../END
-        range_re = re.compile(
-            r"https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s\-]*)?"
-            r"\s*[-–]\s*"
-            r"(?:https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s]*)?|(\d+))",
-            re.I,
-        )
-
-        chat_ref = None
-        start_id = end_id = None
-
-        range_m = range_re.search(text)
-        if range_m:
-            if range_m.group(1):
-                chat_ref = int("-100" + range_m.group(1))
-                start_id = int(range_m.group(2))
-            else:
-                chat_ref = "@" + range_m.group(3)
-                start_id = int(range_m.group(4))
-            if range_m.group(5):
-                end_chat = int("-100" + range_m.group(5))
-                end_id = int(range_m.group(6))
-                if end_chat != chat_ref:
-                    return await message.reply("❌ Start and end must be in the same channel.")
-            elif range_m.group(7):
-                end_chat_name = range_m.group(7)
-                end_id = int(range_m.group(8))
-                if ("@" + end_chat_name) != chat_ref and end_chat_name != str(chat_ref).lstrip("@"):
-                    return await message.reply("❌ Start and end must be in the same channel.")
-            else:
-                end_id = int(range_m.group(9))
-        else:
-            # Fallback: collect all message links in the text and use first→last
-            matches = list(link_re.finditer(text))
-            if len(matches) >= 2:
-                def _parse_link(m):
-                    if m.group(1):
-                        return int("-100" + m.group(1)), int(m.group(2))
-                    return "@" + m.group(3), int(m.group(4))
-
-                chat1, id1 = _parse_link(matches[0])
-                chat2, id2 = _parse_link(matches[-1])
-                if chat1 != chat2:
-                    return await message.reply("❌ Start and end must be in the same channel.")
-                chat_ref, start_id, end_id = chat1, id1, id2
-            elif len(matches) == 1 and re.search(r"\d+\s*[-–]\s*\d+", text):
-                # Single link + bare "123-456" style range somewhere in text
-                m = matches[0]
-                if m.group(1):
-                    chat_ref = int("-100" + m.group(1))
-                    start_id = int(m.group(2))
-                else:
-                    chat_ref = "@" + m.group(3)
-                    start_id = int(m.group(4))
-                bare = re.search(r"(\d+)\s*[-–]\s*(\d+)", text)
-                if bare:
-                    a, b = int(bare.group(1)), int(bare.group(2))
-                    # Prefer the numbers that look like a range containing the link id
-                    if min(a, b) <= start_id <= max(a, b):
-                        start_id, end_id = min(a, b), max(a, b)
-                    else:
-                        end_id = max(a, b) if a != start_id else b
-
-        if chat_ref is None or start_id is None or end_id is None:
-            return await message.reply(
-                "📌 <b>Usage</b>\n\n"
-                "<code>/batch https://t.me/c/4357571996/2081-https://t.me/c/4357571996/2083</code>\n\n"
-                "Or compact:\n"
-                "<code>/batch https://t.me/c/4357571996/2081-2083</code>\n\n"
-                "You can also paste two message links (even on separate lines). "
-                "Query params like <code>?single</code> are fine.",
-                parse_mode=ParseMode.HTML,
-            )
-
-        if end_id < start_id:
-            start_id, end_id = end_id, start_id
-        if end_id - start_id > 200:
-            return await message.reply("❌ Range too large (max 200 messages).")
-
-        status = await message.reply(
-            f"🔄 Batch processing messages <code>{start_id}</code>–<code>{end_id}</code>…",
-            parse_mode=ParseMode.HTML,
-        )
-        base_url = (await get_active_cloudflare_url()) or (await get_active_website_url()) or settings.BASE_URL
-        base_url = str(base_url).rstrip("/")
-        runtime_cfg = await db.site_settings.find_one({"_id": "runtime"}) or {}
-        downloads_enabled = runtime_cfg.get("downloads_enabled", True)
-        streaming_enabled = runtime_cfg.get("streaming_enabled", True)
-
-        results: list[str] = []
-        errors: list[str] = []
-        idx = 0
-        total = end_id - start_id + 1
-        for i, msg_id in enumerate(range(start_id, end_id + 1)):
-            if i > 0 and i % 25 == 0:
-                try:
-                    await status.edit_text(
-                        f"🔄 Batch processing… {i}/{total} (found {idx} media)",
-                        parse_mode=ParseMode.HTML,
-                    )
-                except Exception:
-                    pass
-            try:
-                source_msg = await client.get_messages(chat_ref, msg_id)
-                if isinstance(source_msg, list):
-                    source_msg = source_msg[0] if source_msg else None
-                if not source_msg or not _is_media_message(source_msg):
-                    continue
-                media = (
-                    source_msg.document or source_msg.video or source_msg.audio
-                    or source_msg.animation or source_msg.photo or source_msg.voice
-                    or source_msg.video_note
-                )
-                if source_msg.document:
-                    file_name = media.file_name or "file"
-                    mime_type = media.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-                    file_size = getattr(media, "file_size", None) or 0
-                elif source_msg.video:
-                    file_name = getattr(media, "file_name", None) or f"video_{media.file_unique_id}.mp4"
-                    mime_type = media.mime_type or "video/mp4"
-                    file_size = getattr(media, "file_size", None) or 0
-                elif source_msg.audio:
-                    file_name = media.file_name or f"audio_{media.file_unique_id}.mp3"
-                    mime_type = media.mime_type or "audio/mpeg"
-                    file_size = getattr(media, "file_size", None) or 0
-                elif source_msg.animation:
-                    file_name = getattr(media, "file_name", None) or f"animation_{media.file_unique_id}.mp4"
-                    mime_type = media.mime_type or "video/mp4"
-                    file_size = getattr(media, "file_size", None) or 0
-                elif source_msg.photo:
-                    media = source_msg.photo[-1] if isinstance(source_msg.photo, (list, tuple)) else source_msg.photo
-                    file_name, mime_type = f"photo_{media.file_unique_id}.jpg", "image/jpeg"
-                    file_size = getattr(media, "file_size", None) or 0
-                elif source_msg.voice:
-                    file_name, mime_type = f"voice_{media.file_unique_id}.ogg", media.mime_type or "audio/ogg"
-                    file_size = getattr(media, "file_size", None) or 0
-                else:
-                    file_name, mime_type = f"video_note_{media.file_unique_id}.mp4", "video/mp4"
-                    file_size = getattr(media, "file_size", None) or 0
-
-                caption = getattr(source_msg, "caption", None) or getattr(source_msg, "text", None) or ""
-                file_name = extract_filename_from_caption(caption, file_name)
-
-                file_id = getattr(media, "file_id", None)
-                if not file_id:
-                    continue
-                existing = await files_col.find_one({
-                    "chat_id": source_msg.chat.id,
-                    "message_id": source_msg.id,
-                    "file_id": file_id,
-                })
-                if existing:
-                    short_code = existing["short_code"]
-                else:
-                    short_code = generate_short_code()
-                    file_meta = FileMetadata(
-                        file_id=file_id,
-                        file_unique_id=str(getattr(media, "file_unique_id", source_msg.id)),
-                        filename=file_name,
-                        mime_type=mime_type,
-                        file_size=file_size or 0,
-                        uploader_id=user.id,
-                        short_code=short_code,
-                        chat_id=source_msg.chat.id,
-                        message_id=source_msg.id,
-                        expiry_time=None,
-                    )
-                    await files_col.insert_one(file_meta.dict())
-
-                idx += 1
-                size_str = format_bytes(file_size) if file_size else "—"
-                block = (
-                    f"{idx}. 📁 File: {html.escape(file_name)}\n\n"
-                    f"📦 Size: {size_str}\n\n"
-                    f"🔗 Generated Links\n\n"
-                )
-                fs_username = (runtime_cfg.get("filestore_bot_username") or "").strip().lstrip("@")
-                if downloads_enabled:
-                    dl = f"{base_url}/dl/{short_code}"
-                    block += f"⬇️ Direct Download: <code>{html.escape(dl)}</code>\n\n"
-                elif fs_username:
-                    dl = f"https://t.me/{fs_username}?start=file_{short_code}"
-                    block += f"📥 Get File in Bot: <code>{html.escape(dl)}</code>\n\n"
-                if streaming_enabled:
-                    watch = f"{base_url}/watch/{short_code}"
-                    block += f"▶️ Watch / Stream: <code>{html.escape(watch)}</code>\n"
-                results.append(block)
-            except Exception as e:
-                err_txt = f"{type(e).__name__}: {e}"
-                logger.warning("batch msg %s failed: %s", msg_id, err_txt)
-                if len(errors) < 5:
-                    errors.append(f"• msg {msg_id}: {html.escape(err_txt[:120])}")
-                continue
-
-        if not results:
-            err_block = ("\n\n" + "\n".join(errors)) if errors else ""
-            return await status.edit_text(
-                f"❌ No media found in messages <code>{start_id}</code>–<code>{end_id}</code>."
-                f"{err_block}\n\n"
-                "Make sure the bot is a member/admin of the channel and the IDs are correct.",
-                parse_mode=ParseMode.HTML,
-            )
-
-        header = f"✅ <b>Batch Generated</b> ({idx} file{'s' if idx != 1 else ''})\n\n"
-        # Split into Telegram-safe messages (~3500 chars)
-        chunks: list[str] = []
-        current = header
-        for block in results:
-            if len(current) + len(block) + 2 > 3500:
-                chunks.append(current.rstrip())
-                current = header + f"<i>(continued)</i>\n\n" + block + "\n"
-            else:
-                current += block + "\n"
-        if current.strip():
-            chunks.append(current.rstrip())
+        status = None
 
         try:
-            await status.delete()
-        except Exception:
-            pass
-        for chunk in chunks:
-            await message.reply(chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+            # --- parse links / range -------------------------------------------------
+            link_re = re.compile(
+                r"https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s]*)?",
+                re.I,
+            )
+            range_re = re.compile(
+                r"https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s\-]*)?"
+                r"\s*[-–]\s*"
+                r"(?:https?://t\.me/(?:c/(\d+)/(\d+)|([A-Za-z0-9_]+)/(\d+))(?:\?[^\s]*)?|(\d+))",
+                re.I,
+            )
+
+            chat_ref = None  # str "@name" or int -100...
+            start_id = end_id = None
+
+            range_m = range_re.search(text)
+            if range_m:
+                if range_m.group(1):
+                    chat_ref = int("-100" + range_m.group(1))
+                    start_id = int(range_m.group(2))
+                else:
+                    chat_ref = "@" + range_m.group(3)
+                    start_id = int(range_m.group(4))
+                if range_m.group(5):
+                    end_chat = int("-100" + range_m.group(5))
+                    end_id = int(range_m.group(6))
+                    if end_chat != chat_ref:
+                        return await message.reply("❌ Start and end must be in the same channel.")
+                elif range_m.group(7):
+                    end_chat_name = range_m.group(7)
+                    end_id = int(range_m.group(8))
+                    if ("@" + end_chat_name) != chat_ref and end_chat_name != str(chat_ref).lstrip("@"):
+                        return await message.reply("❌ Start and end must be in the same channel.")
+                else:
+                    end_id = int(range_m.group(9))
+            else:
+                matches = list(link_re.finditer(text))
+                if len(matches) >= 2:
+                    def _parse_link(m):
+                        if m.group(1):
+                            return int("-100" + m.group(1)), int(m.group(2))
+                        return "@" + m.group(3), int(m.group(4))
+
+                    chat1, id1 = _parse_link(matches[0])
+                    chat2, id2 = _parse_link(matches[-1])
+                    if chat1 != chat2:
+                        return await message.reply("❌ Start and end must be in the same channel.")
+                    chat_ref, start_id, end_id = chat1, id1, id2
+                elif len(matches) == 1:
+                    m = matches[0]
+                    if m.group(1):
+                        chat_ref = int("-100" + m.group(1))
+                        start_id = int(m.group(2))
+                    else:
+                        chat_ref = "@" + m.group(3)
+                        start_id = int(m.group(4))
+                    bare = re.search(r"(\d+)\s*[-–]\s*(\d+)", text)
+                    if bare:
+                        a, b = int(bare.group(1)), int(bare.group(2))
+                        start_id, end_id = min(a, b), max(a, b)
+
+            if chat_ref is None or start_id is None or end_id is None:
+                return await message.reply(
+                    "📌 <b>Usage</b>\n\n"
+                    "<code>/batch https://t.me/username/14816-https://t.me/username/14851</code>\n\n"
+                    "Or compact:\n"
+                    "<code>/batch https://t.me/c/1234567890/2081-2083</code>\n\n"
+                    "• Works with public (@username) and private (c/ID) links\n"
+                    "• Bot only needs to be a member/admin of the source channel\n"
+                    "• <b>No storage channel (CHANNEL_ID) required</b> for generating links\n"
+                    "• Query params like <code>?single</code> are fine",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            if end_id < start_id:
+                start_id, end_id = end_id, start_id
+            if end_id - start_id > 200:
+                return await message.reply("❌ Range too large (max 200 messages).")
+
+            # --- resolve peer so get_messages is reliable for public channels ------
+            try:
+                chat_obj = await client.get_chat(chat_ref)
+                resolved_chat_id = chat_obj.id
+                chat_title = getattr(chat_obj, "title", None) or getattr(chat_obj, "username", None) or str(resolved_chat_id)
+            except Exception as e:
+                return await message.reply(
+                    f"❌ Cannot access chat <code>{html.escape(str(chat_ref))}</code>\n\n"
+                    f"<code>{html.escape(type(e).__name__)}: {html.escape(str(e)[:200])}</code>\n\n"
+                    "Add the bot as a member (or admin) of that channel/group and try again.\n"
+                    "No storage channel is required — only access to the source chat.",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            status = await message.reply(
+                f"🔄 Batch processing <b>{html.escape(str(chat_title))}</b>\n"
+                f"Messages <code>{start_id}</code>–<code>{end_id}</code>…\n"
+                f"<i>Storage channel not required for link generation.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+
+            base_url = (
+                (await get_active_cloudflare_url())
+                or (await get_active_website_url())
+                or settings.BASE_URL
+            )
+            base_url = str(base_url or "").rstrip("/")
+            if not base_url:
+                return await status.edit_text(
+                    "❌ No public BASE_URL / Cloudflare URL configured. "
+                    "Set BASE_URL or start the ngrok tunnel first."
+                )
+
+            runtime_cfg = await db.site_settings.find_one({"_id": "runtime"}) or {}
+            downloads_enabled = runtime_cfg.get("downloads_enabled", True)
+            streaming_enabled = runtime_cfg.get("streaming_enabled", True)
+            fs_username = (runtime_cfg.get("filestore_bot_username") or "").strip().lstrip("@")
+
+            results: list[str] = []
+            errors: list[str] = []
+            idx = 0
+            total = end_id - start_id + 1
+
+            for i, msg_id in enumerate(range(start_id, end_id + 1)):
+                if i > 0 and i % 20 == 0:
+                    try:
+                        await status.edit_text(
+                            f"🔄 Batch processing… {i}/{total} (found {idx} media)",
+                            parse_mode=ParseMode.HTML,
+                        )
+                    except Exception:
+                        pass
+                try:
+                    source_msg = await client.get_messages(resolved_chat_id, msg_id)
+                    if isinstance(source_msg, list):
+                        source_msg = source_msg[0] if source_msg else None
+                    if not source_msg or getattr(source_msg, "empty", False) or not _is_media_message(source_msg):
+                        continue
+
+                    media = (
+                        source_msg.document or source_msg.video or source_msg.audio
+                        or source_msg.animation or source_msg.photo or source_msg.voice
+                        or source_msg.video_note
+                    )
+                    if source_msg.document:
+                        file_name = media.file_name or "file"
+                        mime_type = media.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+                        file_size = getattr(media, "file_size", None) or 0
+                    elif source_msg.video:
+                        file_name = getattr(media, "file_name", None) or f"video_{media.file_unique_id}.mp4"
+                        mime_type = media.mime_type or "video/mp4"
+                        file_size = getattr(media, "file_size", None) or 0
+                    elif source_msg.audio:
+                        file_name = media.file_name or f"audio_{media.file_unique_id}.mp3"
+                        mime_type = media.mime_type or "audio/mpeg"
+                        file_size = getattr(media, "file_size", None) or 0
+                    elif source_msg.animation:
+                        file_name = getattr(media, "file_name", None) or f"animation_{media.file_unique_id}.mp4"
+                        mime_type = media.mime_type or "video/mp4"
+                        file_size = getattr(media, "file_size", None) or 0
+                    elif source_msg.photo:
+                        media = source_msg.photo[-1] if isinstance(source_msg.photo, (list, tuple)) else source_msg.photo
+                        file_name, mime_type = f"photo_{media.file_unique_id}.jpg", "image/jpeg"
+                        file_size = getattr(media, "file_size", None) or 0
+                    elif source_msg.voice:
+                        file_name, mime_type = f"voice_{media.file_unique_id}.ogg", media.mime_type or "audio/ogg"
+                        file_size = getattr(media, "file_size", None) or 0
+                    else:
+                        file_name, mime_type = f"video_note_{media.file_unique_id}.mp4", "video/mp4"
+                        file_size = getattr(media, "file_size", None) or 0
+
+                    caption = getattr(source_msg, "caption", None) or getattr(source_msg, "text", None) or ""
+                    file_name = extract_filename_from_caption(caption, file_name)
+
+                    file_id = getattr(media, "file_id", None)
+                    if not file_id:
+                        continue
+
+                    # Prefer source chat + message (no storage channel needed)
+                    src_chat_id = source_msg.chat.id if source_msg.chat else resolved_chat_id
+                    existing = await files_col.find_one({
+                        "chat_id": src_chat_id,
+                        "message_id": source_msg.id,
+                    })
+                    if existing and existing.get("short_code"):
+                        short_code = existing["short_code"]
+                    else:
+                        short_code = generate_short_code()
+                        file_meta = FileMetadata(
+                            file_id=file_id,
+                            file_unique_id=str(getattr(media, "file_unique_id", source_msg.id)),
+                            filename=file_name,
+                            mime_type=mime_type,
+                            file_size=file_size or 0,
+                            uploader_id=user.id,
+                            short_code=short_code,
+                            chat_id=src_chat_id,
+                            message_id=source_msg.id,
+                            expiry_time=None,
+                        )
+                        await files_col.insert_one(file_meta.dict())
+
+                    idx += 1
+                    size_str = format_bytes(file_size) if file_size else "—"
+                    block = (
+                        f"{idx}. 📁 File: {html.escape(file_name)}\n\n"
+                        f"📦 Size: {size_str}\n\n"
+                        f"🔗 Generated Links\n\n"
+                    )
+                    if downloads_enabled and base_url:
+                        dl = f"{base_url}/dl/{short_code}"
+                        block += f"⬇️ Direct Download: <code>{html.escape(dl)}</code>\n\n"
+                    elif fs_username:
+                        dl = f"https://t.me/{fs_username}?start=file_{short_code}"
+                        block += f"📥 Get File in Bot: <code>{html.escape(dl)}</code>\n\n"
+                    if streaming_enabled and base_url:
+                        watch = f"{base_url}/watch/{short_code}"
+                        block += f"▶️ Watch / Stream: <code>{html.escape(watch)}</code>\n"
+                    results.append(block)
+                except Exception as e:
+                    err_txt = f"{type(e).__name__}: {e}"
+                    logger.warning("batch msg %s failed: %s", msg_id, err_txt)
+                    if len(errors) < 6:
+                        errors.append(f"• msg {msg_id}: {html.escape(err_txt[:140])}")
+                    continue
+
+            if not results:
+                err_block = ("\n\n" + "\n".join(errors)) if errors else ""
+                return await status.edit_text(
+                    f"❌ No media found in messages <code>{start_id}</code>–<code>{end_id}</code> "
+                    f"of <b>{html.escape(str(chat_title))}</b>."
+                    f"{err_block}\n\n"
+                    "Checklist:\n"
+                    "• Bot is a member/admin of the channel\n"
+                    "• Message IDs are correct and contain media\n"
+                    "• No storage channel is required for this command",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            header = f"✅ <b>Batch Generated</b> ({idx} file{'s' if idx != 1 else ''})\n\n"
+            chunks: list[str] = []
+            current = header
+            for block in results:
+                if len(current) + len(block) + 2 > 3500:
+                    chunks.append(current.rstrip())
+                    current = header + "<i>(continued)</i>\n\n" + block + "\n"
+                else:
+                    current += block + "\n"
+            if current.strip():
+                chunks.append(current.rstrip())
+
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            for chunk in chunks:
+                await message.reply(chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+        except Exception as e:
+            logger.exception("batch_command failed: %s", e)
+            err = f"❌ <b>Batch failed</b>\n\n<code>{html.escape(type(e).__name__)}: {html.escape(str(e)[:300])}</code>"
+            try:
+                if status:
+                    await status.edit_text(err, parse_mode=ParseMode.HTML)
+                else:
+                    await message.reply(err, parse_mode=ParseMode.HTML)
+            except Exception:
+                try:
+                    await message.reply(f"Batch failed: {type(e).__name__}: {e}")
+                except Exception:
+                    pass
 
     def _is_media_message(msg: Message) -> bool:
         if not msg:
