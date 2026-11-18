@@ -162,12 +162,13 @@ async def _auto_delete_messages(client, chat_id: int, message_ids: list[int], de
 async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to_message: Message | None = None) -> bool:
     """
     Deliver the stored Telegram file to the user with Watch/Download buttons.
-    Tries multiple sources in order:
-      1) storage_chat_id / storage_message_id (log/storage channel — preferred)
-      2) chat_id / message_id (original upload message)
-      3) settings.CHANNEL_ID + storage_message_id
-      4) re-send by file_id (document/video/audio/photo)
-    Then schedules auto-delete when configured.
+
+    Does NOT require CHANNEL_ID. Priority:
+      1) Original source chat_id / message_id (batch / link / upload source)
+      2) storage_chat_id / storage_message_id (optional mirror)
+      3) settings.CHANNEL_ID + stored message ids (optional)
+      4) Live get_messages → fresh file_id → send_*
+      5) Stored file_id send_* fallback
     """
     short_code = file_data.get("short_code") or ""
     fname = file_data.get("filename") or "file"
@@ -179,7 +180,6 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
     orig_chat = file_data.get("chat_id")
     orig_msg = file_data.get("message_id")
 
-    # Build candidate (from_chat_id, message_id) pairs — storage first
     candidates: list[tuple[int, int]] = []
     seen: set[tuple[int, int]] = set()
 
@@ -194,17 +194,34 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
             seen.add(pair)
             candidates.append(pair)
 
-    _add(storage_chat, storage_msg)
+    # Prefer the original source the bot already has access to (batch/link).
+    # Storage channel is optional, not required.
     _add(orig_chat, orig_msg)
+    _add(storage_chat, storage_msg)
     if settings.CHANNEL_ID and storage_msg is not None:
         _add(settings.CHANNEL_ID, storage_msg)
     if settings.CHANNEL_ID and orig_msg is not None:
         _add(settings.CHANNEL_ID, orig_msg)
 
+    async def _send_by_file_id(fid: str, media_mime: str):
+        send_kwargs = {"chat_id": user_id, "caption": f"📂 {fname}"}
+        m = (media_mime or mime or "").lower()
+        if m.startswith("video/") or "video" in m:
+            return await client.send_video(video=fid, **send_kwargs)
+        if m.startswith("audio/") or "audio" in m:
+            return await client.send_audio(audio=fid, **send_kwargs)
+        if m.startswith("image/") or "photo" in m:
+            try:
+                return await client.send_photo(photo=fid, **send_kwargs)
+            except Exception:
+                return await client.send_document(document=fid, **send_kwargs)
+        return await client.send_document(document=fid, **send_kwargs)
+
     copied = None
     last_err: Exception | None = None
 
     for from_chat, mid in candidates:
+        # 1) copy
         try:
             copied = await client.copy_message(
                 chat_id=user_id,
@@ -223,51 +240,82 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
                 "FileStore copy failed short_code=%s from %s/%s: %s",
                 short_code, from_chat, mid, e,
             )
-            # Try forward as alternate
-            try:
-                if hasattr(client, "forward_messages"):
-                    copied = await client.forward_messages(
-                        chat_id=user_id,
-                        from_chat_id=from_chat,
-                        message_ids=mid,
+
+        # 2) forward
+        try:
+            if hasattr(client, "forward_messages"):
+                copied = await client.forward_messages(
+                    chat_id=user_id,
+                    from_chat_id=from_chat,
+                    message_ids=mid,
+                )
+                if isinstance(copied, list):
+                    copied = copied[0] if copied else None
+                if copied is not None:
+                    logger.info(
+                        "FileStore delivered short_code=%s via forward from %s/%s",
+                        short_code, from_chat, mid,
                     )
-                    # forward may return list
-                    if isinstance(copied, list):
-                        copied = copied[0] if copied else None
+                    break
+        except Exception as e2:
+            last_err = e2
+            logger.warning(
+                "FileStore forward failed short_code=%s from %s/%s: %s",
+                short_code, from_chat, mid, e2,
+            )
+
+        # 3) get_messages → fresh file_id → send (works when bot can read the source)
+        try:
+            src = await client.get_messages(from_chat, mid)
+            if isinstance(src, list):
+                src = src[0] if src else None
+            if src and not getattr(src, "empty", False):
+                media = (
+                    src.document or src.video or src.audio or src.animation
+                    or src.voice or src.video_note or src.photo
+                )
+                if src.photo and isinstance(src.photo, (list, tuple)):
+                    media = src.photo[-1]
+                live_fid = getattr(media, "file_id", None) if media else None
+                live_mime = getattr(media, "mime_type", None) if media else None
+                if live_fid:
+                    copied = await _send_by_file_id(str(live_fid), live_mime or "")
                     if copied is not None:
                         logger.info(
-                            "FileStore delivered short_code=%s via forward from %s/%s",
+                            "FileStore delivered short_code=%s via live file_id from %s/%s",
                             short_code, from_chat, mid,
                         )
+                        # Persist fresher file_id for next time
+                        try:
+                            await files_col.update_one(
+                                {"short_code": short_code},
+                                {"$set": {
+                                    "file_id": str(live_fid),
+                                    "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+                                    "mime_type": live_mime or file_data.get("mime_type"),
+                                    "chat_id": from_chat,
+                                    "message_id": mid,
+                                }},
+                            )
+                        except Exception:
+                            pass
                         break
-            except Exception as e2:
-                last_err = e2
-                logger.warning(
-                    "FileStore forward failed short_code=%s from %s/%s: %s",
-                    short_code, from_chat, mid, e2,
-                )
+        except Exception as e3:
+            last_err = e3
+            logger.warning(
+                "FileStore get_messages/send failed short_code=%s from %s/%s: %s",
+                short_code, from_chat, mid, e3,
+            )
 
-    # Last resort: send by file_id (works when this bot owns the file_id)
+    # Last resort: stored file_id
     if copied is None and file_id:
         try:
-            send_kwargs = {"chat_id": user_id, "caption": f"📂 {fname}"}
-            if mime.startswith("video/") or "video" in mime:
-                copied = await client.send_video(video=file_id, **send_kwargs)
-            elif mime.startswith("audio/") or "audio" in mime:
-                copied = await client.send_audio(audio=file_id, **send_kwargs)
-            elif mime.startswith("image/") or "photo" in mime:
-                try:
-                    copied = await client.send_photo(photo=file_id, **send_kwargs)
-                except Exception:
-                    copied = await client.send_document(document=file_id, **send_kwargs)
-            else:
-                copied = await client.send_document(document=file_id, **send_kwargs)
+            copied = await _send_by_file_id(file_id, mime)
             if copied is not None:
-                logger.info("FileStore delivered short_code=%s via file_id", short_code)
+                logger.info("FileStore delivered short_code=%s via stored file_id", short_code)
         except Exception as e:
             last_err = e
             logger.warning("FileStore send by file_id failed short_code=%s: %s", short_code, e)
-            # one more try as document
             try:
                 copied = await client.send_document(
                     chat_id=user_id,
@@ -283,8 +331,10 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
             "FileStore delivery exhausted for short_code=%s candidates=%s last_err=%s",
             short_code, candidates, last_err,
         )
+        detail = str(last_err) if last_err else "no reachable source"
         raise RuntimeError(
-            last_err or "No accessible storage for this file (set CHANNEL_ID and keep the storage message)."
+            f"Could not deliver file (bot needs access to the source message). "
+            f"Tried: {candidates or 'none'}. Last error: {detail}"
         )
 
     button_rows = []
@@ -441,7 +491,17 @@ async def start_filestore_client(token: str, username: str | None = None) -> dic
             await deliver_filestore_file(c, uid, file_data, message)
         except Exception as e:
             logger.exception("FileStore secondary delivery failed: %s", e)
-            await message.reply("❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link.")
+            err = html.escape(str(e)[:220])
+            await message.reply(
+                "❌ **Could not deliver this file**\n\n"
+                f"<code>{err}</code>\n\n"
+                "> Possible causes:\n"
+                "> • Bot cannot access the **source** channel/message (add bot as member/admin there)\n"
+                "> • Original message was deleted from Telegram\n"
+                "> • file_id expired — re-run `/batch` or `/link` on the source\n\n"
+                "> Storage channel (`CHANNEL_ID`) is **optional**. Access to the source chat is enough.",
+                parse_mode=ParseMode.HTML,
+            )
 
     await client.start()
     try:
@@ -954,12 +1014,25 @@ def register_handlers(bot):
                         if ok:
                             return
                         return await message.reply(
-                            "❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link."
+                            "❌ **Could not deliver this file**\n\n"
+                            "> Possible causes:\n"
+                            "> • Bot cannot access the **source** channel/message (add bot as member/admin there)\n"
+                            "> • Original message was deleted from Telegram\n"
+                            "> • file_id expired — re-run `/batch` or `/link` on the source\n\n"
+                            "> Storage channel (`CHANNEL_ID`) is **optional**. Access to the source chat is enough."
                         )
                     except Exception as e:
                         logger.exception("FileStore delivery failed for short_code=%s: %s", code, e)
+                        err = html.escape(str(e)[:220])
                         return await message.reply(
-                            "❌ **Could not deliver this file**\n\n> Possible causes:\n> • Storage channel message missing (set `CHANNEL_ID`, re-upload file)\n> • Bot is not admin in the storage channel\n> • File was deleted from Telegram\n\n> Re-upload the file to the bot, then open the new deep link."
+                            "❌ **Could not deliver this file**\n\n"
+                            f"<code>{err}</code>\n\n"
+                            "> Possible causes:\n"
+                            "> • Bot cannot access the **source** channel/message (add bot as member/admin there)\n"
+                            "> • Original message was deleted from Telegram\n"
+                            "> • file_id expired — re-run `/batch` or `/link` on the source\n\n"
+                            "> Storage channel (`CHANNEL_ID`) is **optional**. Access to the source chat is enough.",
+                            parse_mode=ParseMode.HTML,
                         )
                 else:
                     # Unknown code — fall through to normal greeting (avoid leaking existence)
@@ -2358,7 +2431,21 @@ def register_handlers(bot):
         await callback.answer()
         await callback.message.reply(f"✏️ {prompt}\n\nSend /cancel to abort.")
 
-    @bot.on_message(filters.private & filters.text & ~filters.command(["start", "cancel", "fspanel", "panel", "filestore"]))
+    # IMPORTANT: exclude every command that has its own handler registered later.
+    # Overlapping filters on the same group mean only the first matching handler runs
+    # (see comment near telegram_message_link_handler). Without excluding "batch" etc.,
+    # those commands were swallowed here with a silent return.
+    @bot.on_message(
+        filters.private
+        & filters.text
+        & ~filters.command([
+            "start", "cancel", "fspanel", "panel", "filestore",
+            "batch", "ss", "sv", "mi", "stats", "broadcast", "ban", "unban",
+            "autodel", "addgroups", "save", "link", "addbots", "shorteners",
+            "search", "username", "password", "backendurl", "baseurl",
+            "categories", "edit", "manage",
+        ])
+    )
     async def fspanel_text_input(client, message: Message):
         user = message.from_user
         if not user or user.id not in _awaiting_fspanel:
@@ -2985,8 +3072,9 @@ def register_handlers(bot):
         if not user or not _is_admin_user(user.id):
             return await message.reply("🚫 Admins only.")
 
+        # Immediate ack so the user always sees the command was received
+        status = await message.reply("⏳ Parsing batch range…")
         text = (message.text or message.caption or "").strip()
-        status = None
 
         try:
             # --- parse links / range -------------------------------------------------
@@ -3016,12 +3104,12 @@ def register_handlers(bot):
                     end_chat = int("-100" + range_m.group(5))
                     end_id = int(range_m.group(6))
                     if end_chat != chat_ref:
-                        return await message.reply("❌ Start and end must be in the same channel.")
+                        return await status.edit_text("❌ Start and end must be in the same channel.")
                 elif range_m.group(7):
                     end_chat_name = range_m.group(7)
                     end_id = int(range_m.group(8))
                     if ("@" + end_chat_name) != chat_ref and end_chat_name != str(chat_ref).lstrip("@"):
-                        return await message.reply("❌ Start and end must be in the same channel.")
+                        return await status.edit_text("❌ Start and end must be in the same channel.")
                 else:
                     end_id = int(range_m.group(9))
             else:
@@ -3035,7 +3123,7 @@ def register_handlers(bot):
                     chat1, id1 = _parse_link(matches[0])
                     chat2, id2 = _parse_link(matches[-1])
                     if chat1 != chat2:
-                        return await message.reply("❌ Start and end must be in the same channel.")
+                        return await status.edit_text("❌ Start and end must be in the same channel.")
                     chat_ref, start_id, end_id = chat1, id1, id2
                 elif len(matches) == 1:
                     m = matches[0]
@@ -3051,7 +3139,7 @@ def register_handlers(bot):
                         start_id, end_id = min(a, b), max(a, b)
 
             if chat_ref is None or start_id is None or end_id is None:
-                return await message.reply(
+                return await status.edit_text(
                     "📌 <b>Usage</b>\n\n"
                     "<code>/batch https://t.me/username/14816-https://t.me/username/14851</code>\n\n"
                     "Or compact:\n"
@@ -3066,7 +3154,7 @@ def register_handlers(bot):
             if end_id < start_id:
                 start_id, end_id = end_id, start_id
             if end_id - start_id > 200:
-                return await message.reply("❌ Range too large (max 200 messages).")
+                return await status.edit_text("❌ Range too large (max 200 messages).")
 
             # --- resolve peer so get_messages is reliable for public channels ------
             try:
@@ -3074,7 +3162,7 @@ def register_handlers(bot):
                 resolved_chat_id = chat_obj.id
                 chat_title = getattr(chat_obj, "title", None) or getattr(chat_obj, "username", None) or str(resolved_chat_id)
             except Exception as e:
-                return await message.reply(
+                return await status.edit_text(
                     f"❌ Cannot access chat <code>{html.escape(str(chat_ref))}</code>\n\n"
                     f"<code>{html.escape(type(e).__name__)}: {html.escape(str(e)[:200])}</code>\n\n"
                     "Add the bot as a member (or admin) of that channel/group and try again.\n"
@@ -3082,7 +3170,7 @@ def register_handlers(bot):
                     parse_mode=ParseMode.HTML,
                 )
 
-            status = await message.reply(
+            await status.edit_text(
                 f"🔄 Batch processing <b>{html.escape(str(chat_title))}</b>\n"
                 f"Messages <code>{start_id}</code>–<code>{end_id}</code>…\n"
                 f"<i>Storage channel not required for link generation.</i>",

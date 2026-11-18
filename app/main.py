@@ -346,17 +346,18 @@ async def get_tracks(short_code: str):
         raise HTTPException(status_code=503, detail="Telegram session unavailable")
 
     try:
-        chat_id = file_data.get("storage_chat_id") or file_data.get("chat_id")
-        msg_id = file_data.get("storage_message_id") or file_data.get("message_id")
+        # Prefer original source message; storage channel is optional
+        chat_id = file_data.get("chat_id") or file_data.get("storage_chat_id")
+        msg_id = file_data.get("message_id") or file_data.get("storage_message_id")
         msg = await client.get_messages(chat_id, msg_id)
         if isinstance(msg, list):
             msg = msg[0] if msg else None
-        if not msg and file_data.get("chat_id") != chat_id:
-            msg = await client.get_messages(file_data["chat_id"], file_data["message_id"])
+        if (not msg or getattr(msg, "empty", False)) and file_data.get("storage_chat_id") and file_data.get("storage_chat_id") != chat_id:
+            msg = await client.get_messages(file_data["storage_chat_id"], file_data.get("storage_message_id"))
             if isinstance(msg, list):
                 msg = msg[0] if msg else None
-        if not msg:
-            raise HTTPException(status_code=404, detail="Media no longer available")
+        if not msg or getattr(msg, "empty", False):
+            raise HTTPException(status_code=404, detail="Media no longer available (bot needs access to the source chat)")
 
         if msg.photo and not (msg.document or msg.video or msg.audio):
             return JSONResponse({
