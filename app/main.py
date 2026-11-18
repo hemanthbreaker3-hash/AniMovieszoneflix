@@ -257,6 +257,57 @@ async def watch_page(request: Request, short_code: str):
         raise HTTPException(status_code=404, detail="Link not found")
 
     cf_base = (await get_active_cloudflare_url()) or settings.BASE_URL.rstrip("/")
+    player_settings = await get_settings()
+
+    # Optional catalog title context: ?title=<slug>&g=<group>&b=<button>
+    title_slug = (request.query_params.get("title") or "").strip()
+    try:
+        group_index = max(0, int(request.query_params.get("g") or 0))
+    except (TypeError, ValueError):
+        group_index = 0
+    try:
+        button_index = max(0, int(request.query_params.get("b") or 0))
+    except (TypeError, ValueError):
+        button_index = 0
+
+    watch_groups = []
+    title_page = None
+    if title_slug:
+        try:
+            raw_page = await db.catalog_pages.find_one(
+                {"slug": title_slug, "published": True}, {"_id": 0}
+            )
+            if raw_page:
+                title_page = serialize_catalog_doc(raw_page, cf_base)
+                all_groups = title_page.get("groups") or []
+                for g in all_groups:
+                    box = str((g or {}).get("box") or "watch").strip().lower()
+                    if box not in ("watch", ""):
+                        continue
+                    buttons = []
+                    for btn in (g.get("buttons") or []):
+                        if not isinstance(btn, dict):
+                            continue
+                        url = (btn.get("url") or "").strip()
+                        name = (btn.get("name") or "Watch").strip() or "Watch"
+                        if url:
+                            buttons.append({"name": name, "url": url})
+                    if buttons:
+                        watch_groups.append({
+                            "name": (g.get("name") or "Watch Group").strip() or "Watch Group",
+                            "buttons": buttons,
+                        })
+                if group_index >= len(watch_groups):
+                    group_index = 0
+                if watch_groups:
+                    btns = watch_groups[group_index].get("buttons") or []
+                    if button_index >= len(btns):
+                        button_index = 0
+        except Exception as exc:
+            logger.warning("watch title context load failed: %s", exc)
+
+    fs_user = (player_settings.get("filestore_bot_username") or "").strip().lstrip("@")
+
     return templates.TemplateResponse(
         request=request,
         name="watch.html",
@@ -265,7 +316,13 @@ async def watch_page(request: Request, short_code: str):
             "file": file_data,
             "base_url": cf_base,
             "stream_base_url": cf_base,
-            "player_settings": await get_settings(),
+            "player_settings": player_settings,
+            "title_slug": title_slug or "",
+            "title_page": title_page,
+            "watch_groups": watch_groups,
+            "group_index": group_index,
+            "button_index": button_index,
+            "filestore_bot_username": fs_user,
         },
     )
 

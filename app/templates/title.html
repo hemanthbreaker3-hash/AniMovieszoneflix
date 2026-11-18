@@ -27,10 +27,23 @@
   .groups-pager .pg-jump label{color:var(--muted);font-size:12px}
   .groups-pager .pg-jump input{width:64px;background:var(--bg);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 10px;font:600 13px var(--font);text-align:center}
   .groups-pager .pg-jump button{background:var(--accent);border:0;color:#0b0c10;border-radius:8px;padding:8px 12px;font:700 13px var(--font);cursor:pointer}
+  .auto-open-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;margin:12px 0 0;border-radius:14px;background:linear-gradient(135deg,rgba(255,106,0,.12),rgba(37,99,235,.1));border:1px solid rgba(255,106,0,.28);color:var(--text)}
+  .auto-open-banner .spinner{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:#ff6a00;animation:title-spin .7s linear infinite}
+  @keyframes title-spin{to{transform:rotate(360deg)}}
+  .auto-open-banner a{color:#ffb36f;font-weight:700}
   @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}}
 </style>
 {% endblock %}
 {% block content %}
+{% set all_groups = page.groups or [] %}
+{% set watch_box_groups = all_groups|selectattr('box', 'equalto', 'watch')|list %}
+{% set watch_box_groups = watch_box_groups + (all_groups|rejectattr('box', 'defined')|list) %}
+{% set first_watch_url = '' %}
+{% set first_watch_code = '' %}
+{% if watch_box_groups and watch_box_groups[0].buttons and watch_box_groups[0].buttons[0].url %}
+  {% set first_watch_url = watch_box_groups[0].buttons[0].url %}
+{% endif %}
+
 <article class="detail">
   <img src="{% if page.poster_path and page.poster_path.startswith('http') %}{{ page.poster_path }}{% elif page.poster_path %}https://image.tmdb.org/t/p/w500{{ page.poster_path }}{% else %}/static/images/poster.jpg{% endif %}" alt="{{ page.title }} poster">
   <div>
@@ -46,7 +59,18 @@
     {% endif %}
     {% if page.imdb_id %}<p class="muted" style="margin-top:8px">IMDb: {{ page.imdb_id }}</p>{% endif %}
     {% if page.tagline %}<p style="margin-top:8px"><em>{{ page.tagline }}</em></p>{% endif %}
-    {% set all_groups = page.groups or [] %}
+
+    {% if first_watch_url %}
+    <div class="auto-open-banner" id="autoOpenBanner">
+      <div class="spinner" aria-hidden="true"></div>
+      <div>
+        <strong>Opening built-in player…</strong>
+        <div class="muted" style="font-size:12px;margin-top:2px">First Watch group · first quality</div>
+      </div>
+      <a href="#" id="manualWatchLink">Open manually</a>
+    </div>
+    {% endif %}
+
     {% for box_key, box_title, box_icon in [('watch', 'Watch', '▶'), ('download', 'Download', '⬇')] %}
     <section class="link-box {{ box_key }}" aria-label="{{ box_title }} links" data-box="{{ box_key }}">
       <h2><span aria-hidden="true">{{ box_icon }}</span>{{ box_title }}</h2>
@@ -54,11 +78,18 @@
       {% if box_key == 'watch' %}{% set box_groups = box_groups + (all_groups|rejectattr('box', 'defined')|list) %}{% endif %}
       <div class="groups-list" data-box="{{ box_key }}">
       {% for group in box_groups %}
-      <div class="group-block" data-group-index="{{ loop.index0 }}">
+      {% set g_idx = loop.index0 %}
+      <div class="group-block" data-group-index="{{ g_idx }}">
         <h3>{{ group.name }}</h3>
         <div class="tools">
           {% for button in group.buttons or [] %}
-          <a class="btn btn-yellow cf-media-btn" href="{{ button.url }}" data-raw-url="{{ button.url }}" rel="noopener" target="_blank">{{ button.name }}</a>
+          <a class="btn btn-yellow cf-media-btn {% if box_key == 'watch' %}watch-btn{% endif %}"
+             href="{{ button.url }}"
+             data-raw-url="{{ button.url }}"
+             data-group-index="{{ g_idx }}"
+             data-button-index="{{ loop.index0 }}"
+             rel="noopener"
+             {% if box_key != 'watch' %}target="_blank"{% endif %}>{{ button.name }}</a>
           {% endfor %}
         </div>
       </div>
@@ -114,43 +145,92 @@
   </div>
 </article>
 <script>
-(async () => {
-  let cfBase = {{ (cloudflare_url if cloudflare_url is defined else '')|tojson }};
-  function rewriteToCloudflare(rawHref, baseOrigin) {
-    if (!rawHref || !baseOrigin) return rawHref;
-    const cleanBase = String(baseOrigin).trim().replace(/\/+$/, '');
-    if (!cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) return rawHref;
-    if (rawHref.startsWith('/')) return cleanBase + rawHref;
+(function(){
+  const TITLE_SLUG = {{ page.slug|tojson }};
+  function extractWatchCode(url) {
+    if (!url) return null;
     try {
-      const u = new URL(rawHref, window.location.origin);
-      const cf = new URL(cleanBase);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
-        u.protocol = cf.protocol;
-        u.host = cf.host;
-        return u.toString();
+      const m = String(url).match(/(?:^|\/)watch\/([A-Za-z0-9_-]{3,64})(?:\/|$|\?|#)/i);
+      return m ? m[1] : null;
+    } catch (_) { return null; }
+  }
+  function buildWatchHref(rawUrl, groupIndex, buttonIndex) {
+    const code = extractWatchCode(rawUrl);
+    if (!code) return rawUrl;
+    const params = new URLSearchParams();
+    if (TITLE_SLUG) params.set('title', TITLE_SLUG);
+    params.set('g', String(groupIndex || 0));
+    params.set('b', String(buttonIndex || 0));
+    return '/watch/' + code + '?' + params.toString();
+  }
+
+  // Rewrite watch buttons to open in-site player with title context
+  document.querySelectorAll('a.watch-btn').forEach(a => {
+    const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
+    const gi = parseInt(a.getAttribute('data-group-index') || '0', 10) || 0;
+    const bi = parseInt(a.getAttribute('data-button-index') || '0', 10) || 0;
+    const href = buildWatchHref(raw, gi, bi);
+    a.setAttribute('href', href);
+    a.removeAttribute('target');
+  });
+
+  // Cloudflare rewrite for non-watch media buttons
+  (async () => {
+    let cfBase = {{ (cloudflare_url if cloudflare_url is defined else '')|tojson }};
+    function rewriteToCloudflare(rawHref, baseOrigin) {
+      if (!rawHref || !baseOrigin) return rawHref;
+      const cleanBase = String(baseOrigin).trim().replace(/\/+$/, '');
+      if (!cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) return rawHref;
+      if (rawHref.startsWith('/')) return cleanBase + rawHref;
+      try {
+        const u = new URL(rawHref, window.location.origin);
+        const cf = new URL(cleanBase);
+        if (u.protocol === 'http:' || u.protocol === 'https:') {
+          u.protocol = cf.protocol;
+          u.host = cf.host;
+          return u.toString();
+        }
+      } catch (_) {}
+      return rawHref;
+    }
+    function applyCloudflareButtons(baseOrigin) {
+      if (!baseOrigin) return;
+      document.querySelectorAll('a.cf-media-btn:not(.watch-btn)').forEach(a => {
+        const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
+        const updated = rewriteToCloudflare(raw, baseOrigin);
+        if (updated) a.setAttribute('href', updated);
+      });
+    }
+    if (cfBase) applyCloudflareButtons(cfBase);
+    try {
+      const r = await fetch('/api/site-settings', { cache: 'no-store' });
+      if (r.ok) {
+        const s = await r.json();
+        const latestCf = s.cloudflare_url || s.backend_url || cfBase;
+        if (latestCf) applyCloudflareButtons(latestCf);
       }
     } catch (_) {}
-    return rawHref;
-  }
-  function applyCloudflareButtons(baseOrigin) {
-    if (!baseOrigin) return;
-    document.querySelectorAll('a.cf-media-btn').forEach(a => {
-      const raw = a.getAttribute('data-raw-url') || a.getAttribute('href') || '';
-      const updated = rewriteToCloudflare(raw, baseOrigin);
-      if (updated) a.setAttribute('href', updated);
-    });
-  }
-  if (cfBase) applyCloudflareButtons(cfBase);
-  try {
-    const r = await fetch('/api/site-settings', { cache: 'no-store' });
-    if (r.ok) {
-      const s = await r.json();
-      const latestCf = s.cloudflare_url || s.backend_url || cfBase;
-      if (latestCf) applyCloudflareButtons(latestCf);
+  })();
+
+  // Auto-open first watch group / first button into built-in watch page
+  const firstBtn = document.querySelector('a.watch-btn[data-group-index="0"][data-button-index="0"]')
+    || document.querySelector('a.watch-btn');
+  if (firstBtn) {
+    const dest = firstBtn.getAttribute('href');
+    const manual = document.getElementById('manualWatchLink');
+    if (manual) manual.setAttribute('href', dest);
+    // Skip auto-redirect if user already chose a quality (?stay=1) or came from back
+    const params = new URLSearchParams(window.location.search);
+    const skip = params.get('stay') === '1' || params.get('noredir') === '1';
+    if (!skip && dest) {
+      setTimeout(function(){ window.location.replace(dest); }, 350);
+    } else {
+      const banner = document.getElementById('autoOpenBanner');
+      if (banner) banner.style.display = 'none';
     }
-  } catch (_) {}
-})();
-(function(){
+  }
+
+  // Groups pagination
   var PER=5;
   function setupBox(boxKey){
     var list=document.querySelector('.groups-list[data-box="'+boxKey+'"]');
@@ -167,24 +247,26 @@
     var nextBtn=pager&&pager.querySelector('.pg-next');
     var input=pager&&pager.querySelector('.pg-input');
     var goBtn=pager&&pager.querySelector('.pg-go');
-    if(maxEl) maxEl.textContent=String(max);
-    if(input){ input.max=String(max); input.min='1'; }
     function render(){
-      page=Math.min(Math.max(1,page),max);
-      var start=(page-1)*PER, end=start+PER;
-      blocks.forEach(function(el,i){ el.style.display=(i>=start&&i<end)?'':'none'; });
+      blocks.forEach(function(b,i){
+        var show=i>=(page-1)*PER && i<page*PER;
+        b.style.display=show?'':'none';
+      });
       if(curEl) curEl.textContent=String(page);
+      if(maxEl) maxEl.textContent=String(max);
       if(prevBtn) prevBtn.disabled=page<=1;
       if(nextBtn) nextBtn.disabled=page>=max;
     }
-    if(prevBtn) prevBtn.onclick=function(){ page--; render(); };
-    if(nextBtn) nextBtn.onclick=function(){ page++; render(); };
-    if(goBtn) goBtn.onclick=function(){ page=parseInt(input&&input.value,10)||1; render(); };
+    if(prevBtn) prevBtn.addEventListener('click',function(){ if(page>1){ page--; render(); }});
+    if(nextBtn) nextBtn.addEventListener('click',function(){ if(page<max){ page++; render(); }});
+    if(goBtn&&input) goBtn.addEventListener('click',function(){
+      var n=parseInt(input.value,10);
+      if(!isNaN(n)&&n>=1&&n<=max){ page=n; render(); }
+    });
+    if(maxEl) maxEl.textContent=String(max);
     render();
   }
-  setupBox('watch');
-  setupBox('download');
-  setupBox('telegram');
+  setupBox('watch'); setupBox('download'); setupBox('telegram');
 })();
 </script>
 {% endblock %}
