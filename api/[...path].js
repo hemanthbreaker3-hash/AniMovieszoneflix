@@ -231,30 +231,28 @@ function normalizeAndRewritePageGroups(groups, cloudflareBase) {
   if (!Array.isArray(groups)) return [];
   let watchIdx = 0;
   let dlIdx = 0;
+  const normalizeButton = (btn, fallbackName, depth = 0) => {
+    if (!btn || typeof btn !== 'object' || depth > 12) return null;
+    const name = String(btn.name || fallbackName || 'Watch').trim() || 'Watch';
+    let url = String(btn.url || '').trim();
+    if (url && !/^(https?:\/\/|\/)/i.test(url)) url = 'https://' + url;
+    const nestedRaw = Array.isArray(btn.buttons) ? btn.buttons : [];
+    const nested = nestedRaw.map((child, index) => normalizeButton(child, name + ' ' + (index + 1), depth + 1)).filter(Boolean);
+    if (!url && !nested.length) return null;
+    const item = { name };
+    if (url) item.url = rewriteMediaOrButtonUrl(url, cloudflareBase, true);
+    if (nested.length) item.buttons = nested;
+    return item;
+  };
   const out = [];
   for (const group of groups) {
     if (!group || typeof group !== 'object') continue;
     const box = String(group.box || 'watch').trim().toLowerCase() === 'download' ? 'download' : 'watch';
-    const defaultGName = box === 'watch' ? `Watch Group ${++watchIdx}` : `Download Group ${++dlIdx}`;
+    const defaultGName = box === 'watch' ? 'Watch Group ' + (++watchIdx) : 'Download Group ' + (++dlIdx);
     const name = String(group.name || '').trim() || defaultGName;
     const rawButtons = Array.isArray(group.buttons) ? group.buttons : [];
-    const buttons = [];
-    for (let i = 0; i < rawButtons.length; i++) {
-      const btn = rawButtons[i];
-      if (!btn || typeof btn !== 'object') continue;
-      let bName = String(btn.name || '').trim();
-      let bUrl = String(btn.url || '').trim();
-      if (!bName && !bUrl) continue;
-      if (!bName) bName = `${box === 'watch' ? 'Watch' : 'Download'} ${i + 1}`;
-      if (bUrl && !/^(https?:\/\/|\/)/i.test(bUrl)) bUrl = 'https://' + bUrl;
-      if (bUrl) {
-        buttons.push({
-          name: bName,
-          url: rewriteMediaOrButtonUrl(bUrl, cloudflareBase, true),
-        });
-      }
-    }
-    out.push({ box, name, buttons });
+    const buttons = rawButtons.map((btn, index) => normalizeButton(btn, (box === 'watch' ? 'Watch ' : 'Download ') + (index + 1))).filter(Boolean);
+    out.push({ ...group, box, name, buttons });
   }
   return out;
 }
@@ -2200,6 +2198,12 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     .related-pager button{background:#141b28;border-color:rgba(148,163,184,.18)}.related-pager button.active{background:linear-gradient(120deg,#7c3aed,#22d3ee);color:#071018}
     @media(max-width:520px){.related-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.related-groups{padding:12px!important}.player-shell{border-radius:14px}.player-box{border-radius:12px}}
     @media(min-width:900px){.watch-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.side{align-self:start;position:sticky;top:72px}}
+    .side-eps{padding:18px!important;border:1px solid rgba(214,181,117,.2)!important;background:linear-gradient(155deg,rgba(25,25,31,.98),rgba(10,11,16,.98))!important;box-shadow:0 18px 48px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.04);border-radius:18px!important}
+    .side-eps>b{font-size:16px;color:#f4ead8;display:flex;align-items:center;gap:9px}.side-eps>b:before{content:"";width:3px;height:19px;border-radius:4px;background:linear-gradient(#e8c98e,#a77a3d)}
+    .side-season-bar button{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.035);border-color:rgba(255,255,255,.1);color:#aaa6a0}.side-season-bar button.active{background:linear-gradient(135deg,#e7c98f,#b58b50);color:#17130c;border-color:transparent}
+    .side-ep-tools input,.side-ep-tools select{background:rgba(0,0,0,.28);border-color:rgba(255,255,255,.1);border-radius:11px}.side-ep-list{gap:7px;max-height:min(56vh,520px)}
+    .side-ep-btn{min-height:46px;border-radius:11px;background:linear-gradient(100deg,rgba(255,255,255,.045),rgba(255,255,255,.018));border-color:rgba(255,255,255,.075);transition:transform .16s,border-color .16s,background .16s}
+    .side-ep-btn:hover{transform:translateX(2px);border-color:rgba(216,179,106,.42);background:rgba(216,179,106,.07)}.side-ep-btn.active{border-color:rgba(216,179,106,.62)!important;background:rgba(216,179,106,.1)!important}.side-ep-btn .ep-tag{background:rgba(216,179,106,.13);color:#e5c78f;border:1px solid rgba(216,179,106,.15)}
   </style>`;
 
   // Episodes / Seasons UI lives in the right side panel (sideEpList + season filter)
@@ -2601,74 +2605,41 @@ document.addEventListener('click', () => {
   const search = document.getElementById('episodeSearch');
   const count = document.getElementById('episodeCount');
   const seasonBar = document.getElementById('sideSeasonBar');
-  if (!list || !WATCH_GROUPS.length) {
-    const card = document.getElementById('sideEpsCard');
-    if (card) card.style.display = 'none';
-    return;
+  const card = document.getElementById('sideEpsCard');
+  if (!list || !Array.isArray(WATCH_GROUPS) || !WATCH_GROUPS.length) { if (card) card.style.display = 'none'; return; }
+  const clean = value => String(value || '').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const parseSeason = value => { const t=clean(value), m=t.match(/\bseason\s*0*(\d{1,3})\b/i)||t.match(/\bS\s*0*(\d{1,3})(?!\s*[- ]*E\s*\d)/i); return m?Number(m[1]):null; };
+  function parseEpisode(value, inheritedSeason) {
+    const t=clean(value); let m=t.match(/\bS\s*0*(\d{1,3})\s*[- ]*E\s*0*(\d{1,4})\b/i)||t.match(/\bseason\s*0*(\d{1,3})\s*[- ]*(?:episode|ep)\s*0*(\d{1,4})\b/i)||t.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
+    if(m)return {season:Number(m[1]),episode:Number(m[2])};
+    m=t.match(/\b(?:episode|ep)\s*0*(\d{1,4})\b/i)||t.match(/\bE\s*0*(\d{1,4})\b/i);
+    if(m&&inheritedSeason)return {season:inheritedSeason,episode:Number(m[1])};
+    if(m&&!parseSeason(t))return {season:1,episode:Number(m[1])};
+    return null;
   }
-  const seasonOf = name => {
-    const text = String(name || '');
-    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
-    return m ? 'Season ' + Number(m[1]) : 'Season 1';
-  };
-  const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))].sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
-  seasons.forEach(season => {
-    if (!seasonSelect) return;
-    const o = document.createElement('option');
-    o.value = season; o.textContent = season; seasonSelect.appendChild(o);
-  });
-  function setActiveSeasonUI(value) {
-    if (seasonBar) {
-      seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
-    }
-    if (seasonSelect) seasonSelect.value = value;
-  }
-  if (seasonBar) {
-    const add = (label, value) => {
-      const b = document.createElement('button');
-      b.type = 'button'; b.textContent = label; b.dataset.season = value;
-      b.className = value === 'all' ? 'active' : '';
-      b.onclick = () => { setActiveSeasonUI(value); render(); };
-      seasonBar.appendChild(b);
-    };
-    add('All', 'all');
-    seasons.forEach(s => add(s.replace(/^Season\s+/i, 'S'), s));
-  }
-  function filtered() {
-    const term = (search && search.value || '').trim().toLowerCase();
-    const season = (seasonSelect && seasonSelect.value) || 'all';
-    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
-      const name = String(g.name || '');
-      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
+  const validButton=b=>b&&typeof b==='object'&&typeof b.url==='string'&&b.url.trim();
+  const rows=[];
+  WATCH_GROUPS.forEach((group,groupIndex)=>{
+    if(!group||typeof group!=='object')return;
+    const buttons=Array.isArray(group.buttons)?group.buttons:[], groupSeason=parseSeason(group.name), groupEpisode=parseEpisode(group.name,groupSeason);
+    if(groupEpisode){const bi=buttons.findIndex(validButton);if(bi>=0)rows.push({season:groupEpisode.season,episode:groupEpisode.episode,name:clean(group.name),groupIndex,buttonIndex:bi,url:buttons[bi].url});return;}
+    buttons.forEach((button,buttonIndex)=>{
+      if(!button||typeof button!=='object')return;
+      const nested=Array.isArray(button.buttons)?button.buttons:null;
+      const candidates=nested?nested.map((child,childIndex)=>({child,childIndex})):[{child:button,childIndex:buttonIndex}];
+      candidates.forEach(({child,childIndex})=>{if(!validButton(child))return;const parsed=parseEpisode(child.name||button.name,groupSeason);if(!parsed)return;rows.push({season:parsed.season,episode:parsed.episode,name:clean(child.name||button.name||('Episode '+parsed.episode)),groupIndex,buttonIndex:nested?buttonIndex:childIndex,url:child.url});});
     });
-  }
-  function render() {
-    const rows = filtered();
-    list.innerHTML = '';
-    rows.forEach(({ g, idx }) => {
-      const first = (g.buttons || [])[0];
-      if (!first) return;
-      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
-      const a = document.createElement('a');
-      a.className = 'side-ep-btn' + (idx === GROUP_INDEX ? ' active' : '');
-      a.href = href;
-      const tag = document.createElement('span');
-      tag.className = 'ep-tag';
-      tag.textContent = 'EP ' + (idx + 1);
-      const name = document.createElement('span');
-      name.className = 'ep-name';
-      name.textContent = g.name || ('Episode ' + (idx + 1));
-      a.append(tag, name);
-      list.appendChild(a);
-    });
-    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
-  }
-  search && search.addEventListener('input', render);
-  seasonSelect && seasonSelect.addEventListener('change', () => {
-    setActiveSeasonUI(seasonSelect.value);
-    render();
   });
-  render();
+  rows.sort((a,b)=>a.season-b.season||a.episode-b.episode||a.groupIndex-b.groupIndex||a.buttonIndex-b.buttonIndex);
+  const unique=new Map();rows.forEach(row=>{const key=String(row.season)+':'+String(row.episode);if(!unique.has(key))unique.set(key,row);});
+  const episodes=[...unique.values()], seasons=[...new Set(episodes.map(r=>r.season))].sort((a,b)=>a-b);
+  if(!episodes.length){if(card)card.style.display='none';return;}
+  const current=episodes.find(r=>r.groupIndex===Number(GROUP_INDEX));let selected=current?String(current.season):(seasons.includes(1)?'1':String(seasons[0]));
+  if(seasonSelect){seasonSelect.innerHTML='<option value="all">All Seasons</option>';seasons.forEach(season=>{const o=document.createElement('option');o.value=String(season);o.textContent=('Season '+season);seasonSelect.appendChild(o);});seasonSelect.value=selected;}
+  function setActive(value){selected=value;if(seasonSelect)seasonSelect.value=value;if(seasonBar)seasonBar.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.season===value));}
+  if(seasonBar){seasonBar.innerHTML='';[['all','All Seasons'],...seasons.map(n=>[String(n),'Season '+String(n)])].forEach(([value,label])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.season=value;b.className=value===selected?'active':'';b.addEventListener('click',()=>{setActive(value);render();});seasonBar.appendChild(b);});}
+  function render(){const term=clean(search&&search.value).toLowerCase();const filtered=episodes.filter(r=>(selected==='all'||String(r.season)===selected)&&(!term||r.name.toLowerCase().includes(term)||('episode '+r.episode).includes(term)));list.innerHTML='';filtered.forEach(r=>{const a=document.createElement('a');a.className='side-ep-btn'+(r.groupIndex===Number(GROUP_INDEX)?' active':'');a.href=(typeof watchHrefFor==='function'?watchHrefFor(r.groupIndex,r.buttonIndex):null)||r.url;const tag=document.createElement('span');tag.className='ep-tag';tag.textContent=('S'+String(r.season).padStart(2,'0')+' · EP '+String(r.episode).padStart(2,'0'));const name=document.createElement('span');name.className='ep-name';name.textContent=r.name||('Episode '+r.episode);a.append(tag,name);list.appendChild(a);});if(count)count.textContent=filtered.length+' episode'+(filtered.length===1?'':'s');}
+  if(search)search.addEventListener('input',render);if(seasonSelect)seasonSelect.addEventListener('change',()=>{setActive(seasonSelect.value||'all');render();});render();
 })();
 
 async function copyStream() {
@@ -3712,13 +3683,19 @@ export default async function handler(req, res) {
             for (const g of allGroups) {
               const box = String((g && g.box) || 'watch').trim().toLowerCase();
               if (box && box !== 'watch') continue;
-              const buttons = [];
-              for (const btn of (g && g.buttons) || []) {
-                if (!btn || typeof btn !== 'object') continue;
-                const u = String(btn.url || '').trim();
-                const name = String(btn.name || 'Watch').trim() || 'Watch';
-                if (u) buttons.push({ name, url: u });
-              }
+              const normalizeWatchButton = (btn, fallback = 'Watch') => {
+                if (!btn || typeof btn !== 'object') return null;
+                const name = String(btn.name || fallback).trim() || fallback;
+                const url = String(btn.url || '').trim();
+                const nestedRaw = Array.isArray(btn.buttons) ? btn.buttons : [];
+                const nested = nestedRaw.map((child, i) => normalizeWatchButton(child, (name+' '+(i+1)))).filter(Boolean);
+                if (!url && !nested.length) return null;
+                const item = { name };
+                if (url) item.url = url;
+                if (nested.length) item.buttons = nested;
+                return item;
+              };
+              const buttons = ((g && g.buttons) || []).map((btn, i) => normalizeWatchButton(btn, ('Watch '+(i+1)))).filter(Boolean);
               if (buttons.length) {
                 watchGroups.push({
                   name: String((g && g.name) || 'Watch Group').trim() || 'Watch Group',

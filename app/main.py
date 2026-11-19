@@ -287,14 +287,28 @@ async def watch_page(request: Request, short_code: str):
                     box = str((g or {}).get("box") or "watch").strip().lower()
                     if box not in ("watch", ""):
                         continue
-                    buttons = []
-                    for btn in (g.get("buttons") or []):
+                    def normalize_watch_button(btn, fallback="Watch"):
                         if not isinstance(btn, dict):
-                            continue
-                        url = (btn.get("url") or "").strip()
-                        name = (btn.get("name") or "Watch").strip() or "Watch"
+                            return None
+                        name = str(btn.get("name") or fallback).strip() or fallback
+                        url = str(btn.get("url") or "").strip()
+                        nested_raw = btn.get("buttons") if isinstance(btn.get("buttons"), list) else []
+                        nested = [item for n_i, child in enumerate(nested_raw)
+                                  if (item := normalize_watch_button(child, f"{name} {n_i + 1}")) is not None]
+                        if not url and not nested:
+                            return None
+                        result = {"name": name}
                         if url:
-                            buttons.append({"name": name, "url": url})
+                            result["url"] = url
+                        if nested:
+                            result["buttons"] = nested
+                        return result
+
+                    buttons = []
+                    for b_i, btn in enumerate(g.get("buttons") or []):
+                        item = normalize_watch_button(btn, f"Watch {b_i + 1}")
+                        if item:
+                            buttons.append(item)
                     if buttons:
                         watch_groups.append({
                             "name": (g.get("name") or "Watch Group").strip() or "Watch Group",

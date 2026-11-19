@@ -195,28 +195,30 @@ def rewrite_media_or_button_url(target_url: str, cloudflare_base: str | None, fo
 
 
 def rewrite_page_groups_to_cloudflare(groups: list | None, cloudflare_base: str | None) -> list:
-    """Return a copy of page groups with ALL button URL domains replaced by the active Cloudflare tunnel domain."""
+    """Copy catalog groups while rewriting URLs at every nested button depth."""
     if not isinstance(groups, list):
         return []
+
+    def rewrite_button(button):
+        if not isinstance(button, dict):
+            return None
+        copied = dict(button)
+        if copied.get("url"):
+            copied["url"] = rewrite_media_or_button_url(
+                str(copied["url"]), cloudflare_base, force_replace_domain=True
+            )
+        nested = copied.get("buttons")
+        if isinstance(nested, list):
+            copied["buttons"] = [item for child in nested if (item := rewrite_button(child)) is not None]
+        return copied
+
     updated_groups = []
     for group in groups:
         if not isinstance(group, dict):
             continue
-        g_copy = dict(group)
-        buttons = g_copy.get("buttons")
+        copied = dict(group)
+        buttons = copied.get("buttons")
         if isinstance(buttons, list):
-            new_buttons = []
-            for btn in buttons:
-                if not isinstance(btn, dict):
-                    continue
-                b_copy = dict(btn)
-                if b_copy.get("url"):
-                    b_copy["url"] = rewrite_media_or_button_url(
-                        str(b_copy["url"]),
-                        cloudflare_base,
-                        force_replace_domain=True,
-                    )
-                new_buttons.append(b_copy)
-            g_copy["buttons"] = new_buttons
-        updated_groups.append(g_copy)
+            copied["buttons"] = [item for button in buttons if (item := rewrite_button(button)) is not None]
+        updated_groups.append(copied)
     return updated_groups
