@@ -83,3 +83,13 @@ This flow does **not** copy or forward the media into `CHANNEL_ID` or any storag
 ### Docker Compose compatibility
 
 Use Docker Compose V2 (`docker compose`, with a space). Legacy `docker-compose` v1.29.2 may fail recreating containers with `KeyError: ContainerConfig`. For a one-time recovery, remove only the old web container with `docker-compose rm -sf web` and recreate it; do not delete volumes. See `UPGRADE-NOTES.md`.
+
+### Admin page deletion from Telegram
+
+Use `/del` in a private chat with the bot (admins only):
+
+- `/del https://your-site/title/page-slug`
+- `/del page-slug`
+- `/del Exact Page Title`
+
+Deletion is immediate with no confirmation step. The command uses exact slug or exact case-insensitive title matching; partial matches are rejected to prevent accidental deletion. It removes the page from the shared MongoDB `catalog_pages` collection.

@@ -31,3 +31,13 @@ Do not run `docker-compose down -v`; it deletes named volumes.
 
 ### One-command recovery helper
 From the project directory, run `./fix-containerconfig.sh`. It prefers Docker Compose V2, removes only the old `web` service container, then rebuilds/recreates it. It does not remove Redis or volumes.
+
+## Telegram `/del` command
+
+Admins can now delete a catalog page directly from the private bot chat without a website confirmation:
+
+- `/del https://your-site/title/page-slug`
+- `/del page-slug`
+- `/del Exact Page Title`
+
+The command only accepts an exact slug or exact case-insensitive title match. Partial/fuzzy matches are not deleted, and ambiguous title matches are rejected. It removes the matching document from the shared MongoDB `catalog_pages` collection, so public catalog queries stop returning it.

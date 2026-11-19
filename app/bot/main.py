@@ -797,6 +797,7 @@ async def setup_bot_commands(bot):
             BotCommand("unban", "Unban a user (admin)"),
             BotCommand("autodel", "Auto-delete settings (admin)"),
             BotCommand("addgroups", "Add download/watch groups to a page (admin)"),
+            BotCommand("del", "Delete a website page by link, title, or slug (admin)"),
             BotCommand("save", "Backup or restore full project data (admin)"),
             BotCommand("batch", "Generate links for a message ID range (admin)"),
             BotCommand("ss", "Generate screenshots"),
@@ -2692,6 +2693,75 @@ def register_handlers(bot):
                 )
         except Exception:
             await message.reply("⚠️ **Usage:** `/autodel 24h` or `/autodel off`")
+
+
+    @bot.on_message(filters.command("del") & filters.private)
+    async def delete_catalog_page_command(client, message: Message):
+        user = message.from_user
+        if not user or not _is_admin_user(user.id):
+            return await message.reply("🚫 Admins only.")
+
+        args = (message.text or "").split(maxsplit=1)
+        target = args[1].strip() if len(args) > 1 else ""
+        if not target:
+            return await message.reply(
+                "🗑️ **Delete website page**\n\n"
+                "Usage:\n"
+                "• `/del https://your-site/title/page-slug`\n"
+                "• `/del page-slug`\n"
+                "• `/del Exact Page Title`\n\n"
+                "The matching page is deleted immediately, without a confirmation step. "
+                "Only an exact title or slug match is accepted."
+            )
+
+        # Accept a title slug, /title/slug URL, or exact page title. Never use fuzzy
+        # matching for destructive actions; ambiguous or partial names are rejected.
+        slug = None
+        url_match = re.search(r"/title/([A-Za-z0-9][A-Za-z0-9_-]{0,500})", target, re.I)
+        if url_match:
+            slug = url_match.group(1).lower()
+        else:
+            candidate = target.strip().strip("/").split("?", 1)[0].split("#", 1)[0]
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,500}", candidate):
+                slug = candidate.lower()
+
+        page = None
+        if slug:
+            page = await db.catalog_pages.find_one({"slug": slug})
+        if page is None:
+            # Exact, case-insensitive title lookup (escaped to prevent regex injection).
+            safe_title = re.escape(target[:180])
+            matches = await db.catalog_pages.find(
+                {"title": {"$regex": f"^{safe_title}$", "$options": "i"}},
+                {"_id": 0, "slug": 1, "title": 1},
+            ).to_list(3)
+            if len(matches) == 1:
+                page = matches[0]
+            elif len(matches) > 1:
+                return await message.reply(
+                    "⚠️ More than one page matches that title. Use its exact page URL or slug instead."
+                )
+
+        if not page:
+            return await message.reply(
+                "❌ Page not found. Nothing was deleted. Use the exact page title, slug, or `/title/` URL."
+            )
+
+        page_slug = page.get("slug")
+        page_title = page.get("title") or page_slug or "Untitled"
+        if not page_slug:
+            return await message.reply("❌ This page record has no slug. Nothing was deleted.")
+
+        result = await db.catalog_pages.delete_one({"slug": page_slug})
+        if not result.deleted_count:
+            return await message.reply("❌ Page was not deleted (it may have already been removed).")
+
+        await message.reply(
+            "🗑️ **Page deleted successfully**\n\n"
+            f"**Title:** {page_title}\n"
+            f"**Slug:** `{page_slug}`\n\n"
+            "The page is now removed from the catalog database and will no longer appear in public catalog queries."
+        )
 
     @bot.on_message(filters.command("addgroups") & filters.private)
     async def addgroups_command(client, message: Message):
