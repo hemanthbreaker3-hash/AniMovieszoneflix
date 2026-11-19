@@ -203,8 +203,7 @@
     transition:border-color .2s,box-shadow .2s;
   }
   .select:focus{border-color:var(--blue);box-shadow:var(--neon-blue)}
-  .player-panel{display:none}.player-panel.active{display:block}
-  .player-brand-float{position:absolute;z-index:12;top:12px;left:12px;max-width:65%;padding:6px 11px;border-radius:9px;background:rgba(3,10,24,.55);border:1px solid rgba(96,165,250,.32);color:#60a5fa;font-weight:900;font-size:clamp(11px,2.5vw,16px);letter-spacing:.04em;text-shadow:0 0 14px rgba(59,130,246,.65);pointer-events:none;opacity:.9;transition:top .5s,left .5s,opacity .5s;backdrop-filter:blur(8px)}
+  .player-panel{display:none}.player-panel.active{display:block}\n  .player-brand-float{position:absolute;z-index:12;top:12px;left:12px;max-width:65%;padding:6px 11px;border-radius:9px;background:rgba(3,10,24,.55);border:1px solid rgba(96,165,250,.32);color:#60a5fa;font-weight:900;font-size:clamp(11px,2.5vw,16px);letter-spacing:.04em;text-shadow:0 0 14px rgba(59,130,246,.65);pointer-events:none;opacity:.9;transition:top .5s,left .5s,opacity .5s;backdrop-filter:blur(8px)}
   .player-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
   .pbtn{
     min-height:46px;border:1px solid var(--line);border-radius:12px;
@@ -392,8 +391,7 @@
     <div class="player-shell">
       <div class="neon-ribbon" aria-hidden="true"></div>
       <div class="player-box">
-        <div class="player-wrapper" id="playerWrapper">
-          <div class="player-brand-float" id="playerBrandFloat">{{ BRANDING }}</div>
+        <div class="player-wrapper" id="playerWrapper">\n          <div class="player-brand-float" id="playerBrandFloat">{{ BRANDING }}</div>
           <movi-player id="moviPlayer"
             playsinline controls preload="auto" resume
             theme="dark" themecolor="#8b5cf6"
@@ -643,12 +641,7 @@ function buildPlayerGrids() {
   addPlayer('mobile-grid', 'VLC', androidIntent((typeof EXTERNAL_STREAM_URL!=='undefined'?EXTERNAL_STREAM_URL:STREAM_URL), 'org.videolan.vlc', INTENT_MIME));
   addPlayer('mobile-grid', 'Download', DL_URL);
 }
-buildPlayerGrids();
-(function keepPlayerBrandStable(){
- const badge=document.getElementById('playerBrandFloat');
- if(!badge)return;
- badge.style.left='12px';badge.style.top='12px';
-})();
+buildPlayerGrids();\n(function keepPlayerBrandStable(){\n const badge=document.getElementById('playerBrandFloat');\n if(!badge)return;\n badge.style.left='12px';badge.style.top='12px';\n})();
 
 /* ===== Group / title context for switch, prev/next, related ===== */
 const WATCH_GROUPS = {{ (_wg if _wg is defined else [])|tojson }};
@@ -786,7 +779,7 @@ document.addEventListener('click', () => {
   }
 })();
 
-/* Episodes / Seasons: normalize flat episode groups and season containers without losing source indexes. */
+/* Episode / Seasons: only render seasons actually present; each season is strictly isolated. */
 (function setupRelated() {
   const list = document.getElementById('sideEpList');
   const seasonSelect = document.getElementById('seasonFilter');
@@ -799,129 +792,111 @@ document.addEventListener('click', () => {
     return;
   }
 
-  const clean = value => String(value || '').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
-  function parseSeason(value) {
-    const text = clean(value);
-    const m = text.match(/\bseason\s*0*(\d{1,3})\b/i) || text.match(/\bS\s*0*(\d{1,3})(?!\s*[- ]*E\s*\d)/i);
-    return m ? Number(m[1]) : null;
-  }
-  function parseEpisode(value, inheritedSeason) {
-    const text = clean(value);
-    let m = text.match(/\bS\s*0*(\d{1,3})\s*[- ]*E\s*0*(\d{1,4})\b/i)
-      || text.match(/\bseason\s*0*(\d{1,3})\s*[- ]*(?:episode|ep)\s*0*(\d{1,4})\b/i)
+  function parseEpisode(name) {
+    const text = String(name || '').replace(/[._]+/g, ' ').trim();
+    let m = text.match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
+      || text.match(/\bSeason\s*0*(\d{1,3})\s*[-_. ]*(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
       || text.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
     if (m) return { season: Number(m[1]), episode: Number(m[2]) };
-    m = text.match(/\b(?:episode|ep)\s*0*(\d{1,4})\b/i)
-      || text.match(/\bE\s*0*(\d{1,4})\b/i);
-    if (m && inheritedSeason) return { season: inheritedSeason, episode: Number(m[1]) };
-    if (m && !parseSeason(text)) return { season: 1, episode: Number(m[1]) };
+
+    // A season marker without an episode must never be treated as Season 1.
+    const seasonMarker = text.match(/\bSeason\s*0*(\d{1,3})\b|\bS0*(\d{1,3})(?!\s*[-_. ]*E)/i);
+    if (seasonMarker) return null;
+
+    // Bare EP/E numbers are Season 1 only when no other season marker exists.
+    m = text.match(/\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i);
+    if (m) return { season: 1, episode: Number(m[1]) };
     return null;
   }
-  function validButton(button) {
-    return button && typeof button === 'object' && typeof button.url === 'string' && button.url.trim();
-  }
 
-  const rows = [];
-  WATCH_GROUPS.forEach((group, groupIndex) => {
-    if (!group || typeof group !== 'object') return;
-    const buttons = Array.isArray(group.buttons) ? group.buttons : [];
-    const groupSeason = parseSeason(group.name);
-    const groupEpisode = parseEpisode(group.name, groupSeason);
+  const rows = WATCH_GROUPS.map((g, idx) => ({
+    g, idx, parsed: parseEpisode(g && g.name)
+  })).filter(row => row.parsed &&
+      Number.isInteger(row.parsed.season) && row.parsed.season > 0 &&
+      Number.isInteger(row.parsed.episode) && row.parsed.episode > 0);
 
-    // A group named as an episode represents one episode; its buttons are quality/source choices.
-    if (groupEpisode) {
-      const firstIndex = buttons.findIndex(validButton);
-      if (firstIndex >= 0) rows.push({
-        season: groupEpisode.season, episode: groupEpisode.episode,
-        name: clean(group.name), groupIndex, buttonIndex: firstIndex,
-        url: buttons[firstIndex].url, group, button: buttons[firstIndex]
-      });
-      return;
-    }
-
-    // A Season N container holds episode buttons. Each button is an episode/source link.
-    // Also support nested buttons arrays used by newer catalog payloads.
-    buttons.forEach((button, buttonIndex) => {
-      if (!button || typeof button !== 'object') return;
-      const nested = Array.isArray(button.buttons) ? button.buttons : null;
-      const candidates = nested ? nested.map((child, childIndex) => ({ child, childIndex })) : [{ child: button, childIndex: buttonIndex }];
-      candidates.forEach(({ child, childIndex }) => {
-        if (!validButton(child)) return;
-        const parsed = parseEpisode(child.name || button.name, groupSeason);
-        if (!parsed) return;
-        rows.push({
-          season: parsed.season, episode: parsed.episode,
-          name: clean(child.name || button.name || `Episode ${parsed.episode}`),
-          groupIndex, buttonIndex: nested ? buttonIndex : childIndex,
-          url: child.url, group, button: child
-        });
-      });
-    });
-  });
-
-  // Collapse duplicate representations of the same episode while retaining the first valid playable URL.
-  const unique = new Map();
-  rows.sort((a, b) => a.season - b.season || a.episode - b.episode || a.groupIndex - b.groupIndex || a.buttonIndex - b.buttonIndex);
-  rows.forEach(row => {
-    const key = `${row.season}:${row.episode}`;
-    if (!unique.has(key)) unique.set(key, row);
-  });
-  const episodes = [...unique.values()];
-  const seasons = [...new Set(episodes.map(row => row.season))].sort((a, b) => a - b);
-  if (!episodes.length) {
+  rows.sort((a,b) => a.parsed.season-b.parsed.season ||
+    a.parsed.episode-b.parsed.episode || a.idx-b.idx);
+  const seasons = [...new Set(rows.map(row => row.parsed.season))].sort((a,b)=>a-b);
+  if (!rows.length || !seasons.length) {
     if (card) card.style.display = 'none';
     return;
   }
 
-  const current = episodes.find(row => row.groupIndex === Number(GROUP_INDEX) &&
-    (row.buttonIndex === Number(BUTTON_INDEX) || row.groupIndex === Number(GROUP_INDEX)));
-  let selected = current ? String(current.season) : (seasons.includes(1) ? '1' : String(seasons[0]));
+  const currentRow = rows.find(row => row.idx === Number(GROUP_INDEX));
+  let selected = currentRow ? String(currentRow.parsed.season) :
+    (seasons.includes(1) ? '1' : String(seasons[0]));
 
   if (seasonSelect) {
     seasonSelect.innerHTML = '<option value="all">All Seasons</option>';
     seasons.forEach(season => {
       const option = document.createElement('option');
-      option.value = String(season); option.textContent = `Season ${season}`;
+      option.value = String(season);
+      option.textContent = 'Season ' + season;
       seasonSelect.appendChild(option);
     });
     seasonSelect.value = selected;
   }
+
   function setActiveSeasonUI(value) {
     selected = value;
     if (seasonSelect) seasonSelect.value = value;
     if (seasonBar) seasonBar.querySelectorAll('button').forEach(button =>
       button.classList.toggle('active', button.dataset.season === value));
   }
+
   if (seasonBar) {
     seasonBar.innerHTML = '';
-    [['all', 'All Seasons'], ...seasons.map(season => [String(season), `Season ${season}`])].forEach(([value, label]) => {
+    const all = document.createElement('button');
+    all.type = 'button'; all.textContent = 'All Seasons'; all.dataset.season = 'all';
+    all.className = selected === 'all' ? 'active' : '';
+    all.addEventListener('click', () => { setActiveSeasonUI('all'); render(); });
+    seasonBar.appendChild(all);
+
+    seasons.forEach(season => {
       const button = document.createElement('button');
-      button.type = 'button'; button.textContent = label; button.dataset.season = value;
-      button.className = value === selected ? 'active' : '';
-      button.addEventListener('click', () => { setActiveSeasonUI(value); render(); });
+      button.type = 'button';
+      button.textContent = 'Season ' + season;
+      button.dataset.season = String(season);
+      button.className = String(season) === selected ? 'active' : '';
+      button.addEventListener('click', () => {
+        setActiveSeasonUI(String(season)); render();
+      });
       seasonBar.appendChild(button);
     });
   }
+
   function render() {
-    const term = clean(search && search.value).toLowerCase();
-    const filtered = episodes.filter(row =>
-      (selected === 'all' || String(row.season) === selected) &&
-      (!term || row.name.toLowerCase().includes(term) || `episode ${row.episode}`.includes(term))
+    const term = (search && search.value || '').trim().toLowerCase();
+    const filtered = rows.filter(row =>
+      (selected === 'all' || String(row.parsed.season) === selected) &&
+      (!term || String(row.g.name || '').toLowerCase().includes(term))
     );
     list.innerHTML = '';
-    filtered.forEach(row => {
+    filtered.forEach(({g, idx, parsed}) => {
+      const first = (g.buttons || [])[0];
+      if (!first || !first.url) return;
+      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
       const link = document.createElement('a');
-      link.className = 'side-ep-btn' + (row.groupIndex === Number(GROUP_INDEX) ? ' active' : '');
-      link.href = (typeof watchHrefFor === 'function' ? watchHrefFor(row.groupIndex, row.buttonIndex) : null) || row.url;
-      const tag = document.createElement('span'); tag.className = 'ep-tag';
-      tag.textContent = `S${String(row.season).padStart(2, '0')} · EP ${String(row.episode).padStart(2, '0')}`;
-      const name = document.createElement('span'); name.className = 'ep-name'; name.textContent = row.name || `Episode ${row.episode}`;
-      link.append(tag, name); list.appendChild(link);
+      link.className = 'side-ep-btn' + (idx === Number(GROUP_INDEX) ? ' active' : '');
+      link.href = href;
+      const tag = document.createElement('span');
+      tag.className = 'ep-tag';
+      tag.textContent = 'S' + String(parsed.season).padStart(2,'0') +
+        ' · EP ' + String(parsed.episode).padStart(2,'0');
+      const name = document.createElement('span');
+      name.className = 'ep-name';
+      name.textContent = g.name || ('Episode ' + parsed.episode);
+      link.append(tag, name);
+      list.appendChild(link);
     });
-    if (count) count.textContent = `${filtered.length} episode${filtered.length === 1 ? '' : 's'}`;
+    if (count) count.textContent = filtered.length + ' episode' + (filtered.length === 1 ? '' : 's');
   }
-  if (search) search.addEventListener('input', render);
-  if (seasonSelect) seasonSelect.addEventListener('change', () => { setActiveSeasonUI(seasonSelect.value || 'all'); render(); });
+
+  search && search.addEventListener('input', render);
+  seasonSelect && seasonSelect.addEventListener('change', () => {
+    setActiveSeasonUI(seasonSelect.value || 'all'); render();
+  });
   render();
 })();
 
@@ -1279,21 +1254,4 @@ if (engine === 'wasm') {
 .player-shell{background:#080808;box-shadow:0 18px 48px rgba(0,0,0,.58),0 0 20px rgba(216,179,106,.10)}
 .player-shell .neon-ribbon{background:conic-gradient(from 0deg,#8b6b34,#e7c77f,#8b6b34,#d4ad61,#8b6b34)}
 .player-loading .spinner{border-top-color:#d8b36a}
-
-  /* Premium cinematic season / episode navigator */
-  .side-eps{padding:18px!important;border:1px solid rgba(214,181,117,.2)!important;background:linear-gradient(155deg,rgba(25,25,31,.98),rgba(10,11,16,.98))!important;box-shadow:0 18px 48px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.04);border-radius:18px!important}
-  .side-eps>b{font-family:var(--font-display);font-size:16px;letter-spacing:.01em;color:#f4ead8;display:flex;align-items:center;gap:9px}
-  .side-eps>b:before{content:"";width:3px;height:19px;border-radius:4px;background:linear-gradient(#e8c98e,#a77a3d);box-shadow:0 0 14px rgba(216,179,106,.35)}
-  .side-season-bar{gap:7px;margin:3px 0 5px}
-  .side-season-bar button{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.035);border-color:rgba(255,255,255,.1);color:#aaa6a0;transition:all .18s ease}
-  .side-season-bar button.active{background:linear-gradient(135deg,#e7c98f,#b58b50);color:#17130c;border-color:transparent;box-shadow:0 5px 18px rgba(181,139,80,.2)}
-  .side-ep-tools input,.side-ep-tools select{background:rgba(0,0,0,.28);border-color:rgba(255,255,255,.1);border-radius:11px;color:#eee}
-  .side-ep-tools input:focus,.side-ep-tools select:focus{border-color:rgba(216,179,106,.55);box-shadow:0 0 0 3px rgba(216,179,106,.1)}
-  .side-ep-list{gap:7px;max-height:min(56vh,520px);padding:2px 3px 2px 0}
-  .side-ep-btn{min-height:46px;padding:10px 11px;border-radius:11px;background:linear-gradient(100deg,rgba(255,255,255,.045),rgba(255,255,255,.018));border-color:rgba(255,255,255,.075);transition:transform .16s,border-color .16s,background .16s}
-  .side-ep-btn:hover{transform:translateX(2px);border-color:rgba(216,179,106,.42);background:rgba(216,179,106,.07)}
-  .side-ep-btn.active{border-color:rgba(216,179,106,.62)!important;background:linear-gradient(100deg,rgba(216,179,106,.14),rgba(255,255,255,.025))!important}
-  .side-ep-btn .ep-tag{background:rgba(216,179,106,.13);color:#e5c78f;border:1px solid rgba(216,179,106,.15)}
-  .side-ep-count{padding-top:3px;color:#a7a09a;font-size:11px;letter-spacing:.04em}
-  @media(max-width:899px){.side-eps{max-height:none}.side-ep-list{max-height:44vh}}
 </style>

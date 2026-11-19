@@ -83,33 +83,22 @@ class PageInput(BaseModel):
             gname = str(group.get('name') or '').strip() or default_gname
             raw_buttons = group.get('buttons') if isinstance(group.get('buttons'), list) else []
             clean_buttons = []
-            def normalize_button(button, fallback_name):
+            for b_i, button in enumerate(raw_buttons):
                 if not isinstance(button, dict):
-                    return None
-                bname = str(button.get('name') or '').strip() or fallback_name
+                    continue
+                bname = str(button.get('name') or '').strip()
                 target = str(button.get('url') or '').strip()
+                if not bname and not target:
+                    continue
+                if not bname:
+                    bname = f"{'Watch' if box == 'watch' else 'Download'} {b_i + 1}"
                 if target and not target.startswith(('http://', 'https://', '/')):
                     target = 'https://' + target
                 if target:
                     parsed = urlparse(target)
                     if parsed.scheme and parsed.scheme not in ('http', 'https'):
                         raise ValueError(f'Invalid URL scheme in button "{bname}"')
-                nested_raw = button.get('buttons') if isinstance(button.get('buttons'), list) else []
-                nested = [item for n_i, child in enumerate(nested_raw)
-                          if (item := normalize_button(child, f'{bname} {n_i + 1}')) is not None]
-                if not target and not nested:
-                    return None
-                result = {'name': bname}
-                if target:
-                    result['url'] = target
-                if nested:
-                    result['buttons'] = nested
-                return result
-
-            for b_i, button in enumerate(raw_buttons):
-                normalized = normalize_button(button, f"{'Watch' if box == 'watch' else 'Download'} {b_i + 1}")
-                if normalized:
-                    clean_buttons.append(normalized)
+                    clean_buttons.append({'name': bname, 'url': target})
             normalized_groups.append({'box': box, 'name': gname, 'buttons': clean_buttons})
         return normalized_groups
 
