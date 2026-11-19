@@ -45,3 +45,10 @@ The command only accepts an exact slug or exact case-insensitive title match. Pa
 ## Automatic web-container replacement
 
 Run `./fix-containerconfig.sh` from the extracted project directory. It detects Docker Compose V2 when available, removes only old Compose-labeled `web` containers for this project, rebuilds the web image, and starts the replacement. It does not remove Redis, named volumes, or database data. It prints container status and recent logs. If the project directory name differs from the Compose project name, set `COMPOSE_PROJECT_NAME` before running.
+
+
+## Cinematic UI and season navigation refresh
+- Refreshed the home hero, poster rails, navigation branding, typography and season selector with a cinematic dark/gold visual system.
+- The site header continues to use the configured `BRANDING` and `LOGO_URL` values. Set these in `.env` to use the exported brand name and logo URL.
+- Season tabs now recognize both episode labels (`S01E01`, `1x01`, `Season 1 Episode 1`) and season-level groups named `Season 1`, `S2`, etc. Only seasons present in the catalog are shown; existing groups and links are retained.
+- Updated the Vercel watch-page fallback so its player switch control is icon-only instead of showing the “Buffering? Switch to basic player” label.
