@@ -1,4 +1,4 @@
-# AniMoviesZoneflix OTT UI Upgrade
+# AniMovieszoneflix OTT UI Upgrade
 
 ## Visual refresh
 - Premium dark slate UI with violet and aqua accent colours.

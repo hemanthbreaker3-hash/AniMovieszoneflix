@@ -28,7 +28,7 @@ class SessionManager:
         if self.bot_client is not None:
             return
         self.bot_client = Client(
-            name="AniMoviesZoneflix_bot",
+            name="HITLER YT_bot",
             api_id=settings.API_ID,
             api_hash=settings.API_HASH,
             bot_token=settings.BOT_TOKEN,
@@ -48,7 +48,7 @@ class SessionManager:
         if self.bot_client is None:
             self.prepare_bot()
         await self.bot_client.start()
-        logger.info("AniMoviesZoneflix primary bot client started (wzgram)")
+        logger.info("AniMovieszoneflix primary bot client started (wzgram)")
         await self.register_bot_commands()
 
         # Always include primary bot client in the streaming pool
@@ -65,7 +65,7 @@ class SessionManager:
         for i, session_str in enumerate(session_strings):
             try:
                 client = Client(
-                    name=f"AniMoviesZoneflix_user_{i}",
+                    name=f"HITLER YT_user_{i}",
                     api_id=settings.API_ID,
                     api_hash=settings.API_HASH,
                     session_string=session_str,
@@ -138,7 +138,7 @@ class SessionManager:
 
         bot_prefix = clean_token.split(":", 1)[0]
         client = Client(
-            name=f"AniMoviesZoneflix_helper_{bot_prefix}_{len(self.helper_bots) + 1}",
+            name=f"HITLER YT_helper_{bot_prefix}_{len(self.helper_bots) + 1}",
             api_id=settings.API_ID,
             api_hash=settings.API_HASH,
             bot_token=clean_token,

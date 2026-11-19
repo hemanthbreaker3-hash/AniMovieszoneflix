@@ -558,19 +558,19 @@ async function verifyAdminAuth(req, db) {
 
 function sendUnauthorized(res) {
   res.statusCode = 401;
-  res.setHeader('WWW-Authenticate', 'Basic realm="AniMoviesZoneflix-Panel"');
+  res.setHeader('WWW-Authenticate', 'Basic realm="AniMovieszoneflix-Panel"');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ detail: 'Invalid panel username or password' }));
 }
 
-function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content = '' }) {
+function renderBaseLayout({ title = 'AniMovieszoneflix', headExtra = '', content = '' }) {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0c">
-  <meta name="description" content="AniMoviesZoneflix — discover anime, movies and series.">
+  <meta name="description" content="AniMovieszoneflix — discover anime, movies and series.">
   <meta name="color-scheme" content="dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -688,7 +688,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
     @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
     .fade-up{animation:fadeUp .45s ease both}
 
-    /* AniMoviesZoneflix anime-cinema theme */
+    /* AniMovieszoneflix anime-cinema theme */
     body{background:radial-gradient(ellipse 75% 38% at 5% -8%,rgba(139,92,246,.16),transparent 62%),radial-gradient(ellipse 65% 42% at 100% 5%,rgba(111,48,151,.13),transparent 60%),linear-gradient(180deg,#09090d,#0b0a10 52%,#09090d)}
     .topbar{border-bottom-color:rgba(139,92,246,.18)}
     .topbar-logo img{display:block;object-fit:contain;background:#0a0a0c}
@@ -713,11 +713,11 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="topbar-logo" href="/" title="AniMoviesZoneflix Home">
-      <img src="/static/images/logo.jpg" alt="AniMoviesZoneflix" width="42" height="42" loading="eager" onerror="this.style.display='none'">
+    <a class="topbar-logo" href="/" title="AniMovieszoneflix Home">
+      <img src="/static/images/logo.jpg" alt="AniMovieszoneflix" width="42" height="42" loading="eager" onerror="this.style.display='none'">
       <span class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true"><span>AZF</span></span>
-        <span class="brand-word">AniMoviesZoneflix</span>
+        <span class="brand-mark" aria-hidden="true"><span>AMZ</span></span>
+        <span class="brand-word">AniMovieszoneflix</span>
       </span>
     </a>
     <nav class="topbar-links" aria-label="Primary">
@@ -729,7 +729,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
   </div>
 </header>
 <main class="wrap fade-up">${content}</main>
-<footer class="footer wrap"><strong>AniMoviesZoneflix</strong> · Stream &amp; download with speed and clarity</footer>
+<footer class="footer wrap"><strong>AniMovieszoneflix</strong> · Stream &amp; download with speed and clarity</footer>
 </body>
 </html>`;
 }
@@ -977,7 +977,7 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
   await load();
 })();
 </script>`;
-  return renderBaseLayout({ title: 'AniMoviesZoneflix · Movies & Series', content });
+  return renderBaseLayout({ title: 'AniMovieszoneflix · Movies & Series', content });
 }
 
 function renderSearchHtml({ results, query, typeFilter, yearFilter, genreFilter, categoryFilter, categories, genres }) {
@@ -1053,7 +1053,7 @@ function renderSearchHtml({ results, query, typeFilter, yearFilter, genreFilter,
 <div class="poster-grid">${cardsHtml}</div>`;
 
   return renderBaseLayout({
-    title: `${query ? `Search: ${query}` : 'Search'} · AniMoviesZoneflix`,
+    title: `${query ? `Search: ${query}` : 'Search'} · AniMovieszoneflix`,
     content,
   });
 }
@@ -1264,7 +1264,7 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
 <article class="detail">
   <img src="${escapeHtml(poster)}" alt="${escapeHtml(page.title)} poster">
   <div>
-    <div class="eyebrow">AniMoviesZoneflix · ${escapeHtml(String(page.media_type || 'movie').toUpperCase())}</div>
+    <div class="eyebrow">AniMovieszoneflix · ${escapeHtml(String(page.media_type || 'movie').toUpperCase())}</div>
     <h1>${escapeHtml(page.title)}</h1>
     <div class="meta">
       <span>${escapeHtml(page.release_date || 'Release date unavailable')}</span>
@@ -1405,7 +1405,7 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
 </script>`;
 
   return renderBaseLayout({
-    title: `${page.title || 'Title'} · AniMoviesZoneflix`,
+    title: `${page.title || 'Title'} · AniMovieszoneflix`,
     headExtra,
     content,
   });
@@ -1450,7 +1450,7 @@ function renderPanelHtml(settings) {
     )
     .join('');
 
-  const content = `<h1>AniMoviesZoneflix · Control Center</h1>
+  const content = `<h1>AniMovieszoneflix · Control Center</h1>
 <p class="muted">Manage website and playback settings. Changes are saved to MongoDB.</p>
 
 <div class="admin-grid">
@@ -2079,7 +2079,7 @@ loadUrls();
 </script>`;
 
   return renderBaseLayout({
-    title: 'Admin Panel · AniMoviesZoneflix',
+    title: 'Admin Panel · AniMovieszoneflix',
     headExtra,
     content,
   });
@@ -2112,7 +2112,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   var isMkv = /\\.mkv(?:$|[?#])/i.test(window.location.pathname || '') ||
               /\\.mkv\\b/i.test(document.title || '');
    var engine = (forced === 'native') ? 'native' : 'wasm'; // Movi Player is the default built-in engine.
-  window.__AniMoviesZoneflixPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
+  window.__HITLERYTPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
   function addLink(rel, href, attrs) {
     var l = document.createElement('link');
     l.rel = rel; l.href = href;
@@ -2266,7 +2266,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     </div>
   </section>
   <aside class="side">
-    <div class="card side-eps" id="sideEpsCard">
+    <div class="card side-eps" id="sideEpsCard"${watchGroups.length > 1 ? '' : ' style="display:none"'}>
       <b>Episodes / Seasons</b>
       <div class="side-season-bar" id="sideSeasonBar" aria-label="Seasons"></div>
       <div class="side-ep-tools">
@@ -2309,7 +2309,7 @@ const FILE_NAME = ${safeJsonForScript(file.filename || '')};
 
 const FILE_URL = STREAM_URL;
 const REMUX_URL = PLAY_ORIGIN + '/remux/' + SHORT_CODE;
-const CFG = window.__AniMoviesZoneflixPlayer || {};
+const CFG = window.__HITLERYTPlayer || {};
 const MODULE_URL = (CFG.cdn || 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/') + 'element.slim.js';
 const MOVI_GLOBAL = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js';
 const MOVI_GLOBAL_FALLBACK = 'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js';
@@ -2328,29 +2328,6 @@ function showToast(msg) {
   const m = document.getElementById('toast-message');
   if (m) m.textContent = msg || 'OK';
   if (t) { t.classList.add('active'); setTimeout(() => t.classList.remove('active'), 2200); }
-}
-
-function warmMedia(url) {
-  try {
-    fetch(url, { headers: { Range: 'bytes=0-65535' }, priority: 'low' })
-      .then(async (r) => {
-        const ctype = (r.headers.get('content-type') || '').toLowerCase();
-        if (!r.ok || ctype.includes('application/json') || ctype.includes('text/html')) {
-          let msg = 'Stream unavailable from VPS tunnel';
-          try {
-            const j = await r.clone().json();
-            if (j && j.message) msg = j.message;
-          } catch (_) {}
-          hideLoading();
-          showToast(msg);
-          const st = document.getElementById('copy-status');
-          if (st) st.textContent = msg + ' Use Download / external player, or fix ngrok bandwidth on the VPS.';
-          return;
-        }
-        return r.arrayBuffer();
-      })
-      .catch(() => {});
-  } catch (_) {}
 }
 
 function startMoviAutoplay() {
@@ -2381,21 +2358,53 @@ function startMoviAutoplay() {
   [250, 800, 1600, 3000, 5000].forEach(ms => setTimeout(attempt, ms));
 }
 
+let moviStallTimer = null;
+let moviStallRetries = 0;
+let moviLastProgressAt = Date.now();
+function clearMoviStallTimer() {
+  if (moviStallTimer) { clearTimeout(moviStallTimer); moviStallTimer = null; }
+}
+function scheduleMoviStallRecovery() {
+  clearMoviStallTimer();
+  moviStallTimer = setTimeout(() => {
+    moviStallTimer = null;
+    if (!moviPlayer || moviPlayer.paused) return;
+    if (Date.now() - moviLastProgressAt < 17000) { scheduleMoviStallRecovery(); return; }
+    if (moviStallRetries >= 2) {
+      showToast('Stream is still buffering. Check your connection and tap Play to retry.');
+      return;
+    }
+    moviStallRetries += 1;
+    const resumeAt = Number(moviPlayer.currentTime) || 0;
+    showLoading();
+    try {
+      moviPlayer.src = FILE_URL;
+      if (typeof moviPlayer.load === 'function') moviPlayer.load();
+      const restore = () => {
+        if (resumeAt > 1) { try { moviPlayer.currentTime = resumeAt; } catch (_) {} }
+        startMoviAutoplay();
+      };
+      moviPlayer.addEventListener('loadedmetadata', restore, { once: true });
+      setTimeout(() => { if (moviPlayer && moviPlayer.readyState >= 1) restore(); }, 1800);
+    } catch (err) { console.warn('[player] Movi buffering recovery failed', err); }
+  }, 18000);
+}
 function startWasm() {
-  if (!wasmWired && moviPlayer) {
-    wasmWired = true;
-    moviPlayer.addEventListener('playing', hideLoading);
-    moviPlayer.addEventListener('canplay', hideLoading);
-    moviPlayer.addEventListener('waiting', showLoading);
-    moviPlayer.addEventListener('stalled', showLoading);
-    moviPlayer.addEventListener('error', () => { hideLoading(); showToast('Movi Player could not load this stream. Please retry.'); });
-  }
   if (!moviPlayer) { hideLoading(); showToast('Movi Player element is missing'); return; }
+  if (!wasmWired) {
+    wasmWired = true;
+    const progress = () => { moviLastProgressAt = Date.now(); if (!moviPlayer.paused) scheduleMoviStallRecovery(); };
+    moviPlayer.addEventListener('playing', () => { moviStallRetries = 0; progress(); hideLoading(); });
+    ['progress','timeupdate','canplay','canplaythrough'].forEach(evt => moviPlayer.addEventListener(evt, () => { progress(); if (evt !== 'progress') hideLoading(); }));
+    ['waiting','stalled'].forEach(evt => moviPlayer.addEventListener(evt, () => { showLoading(); moviLastProgressAt = Date.now(); scheduleMoviStallRecovery(); }));
+    moviPlayer.addEventListener('pause', clearMoviStallTimer);
+    moviPlayer.addEventListener('error', () => { clearMoviStallTimer(); hideLoading(); showToast('Movi Player could not load this stream. Check the source or retry.'); });
+  }
   moviPlayer.style.display = 'block';
   if (!wasmLoaded) {
-    wasmLoaded = true;
     moviPlayer.src = FILE_URL;
     try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
+    wasmLoaded = true;
   }
   startMoviAutoplay();
 }
@@ -2565,7 +2574,7 @@ document.addEventListener('click', () => {
   const search = document.getElementById('episodeSearch');
   const count = document.getElementById('episodeCount');
   const seasonBar = document.getElementById('sideSeasonBar');
-  if (!list || !WATCH_GROUPS.length) {
+  if (!list || WATCH_GROUPS.length <= 1) {
     const card = document.getElementById('sideEpsCard');
     if (card) card.style.display = 'none';
     return;
@@ -2654,7 +2663,7 @@ async function copyDownload() {
 </script>`;
 
   return renderBaseLayout({
-    title: `${file.filename || 'Watch'} · AniMoviesZoneflix`,
+    title: `${file.filename || 'Watch'} · AniMovieszoneflix`,
     headExtra,
     content,
   });
@@ -2693,7 +2702,7 @@ function sendKeyPage(res, target, error = '') {
   const safeTarget = escapeHtml(target);
   const encodedTarget = encodeURIComponent(target);
   const safeError = error ? `<p style="color:#f87171;margin-top:14px">${escapeHtml(error)}</p>` : '';
-  sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Key Verification · AniMoviesZoneflix</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#090d18;color:#f8fafc;font:15px system-ui;padding:20px}main{width:min(420px,100%);padding:28px;border:1px solid #263449;border-radius:18px;background:#111827}h1{font-size:22px}p{color:#aab7ca;font-size:14px}input,button,a{width:100%;display:block;padding:13px;margin-top:12px;border-radius:10px;font:inherit}input{background:#0b1220;border:1px solid #334155;color:white}button{border:0;background:#38bdf8;color:#06111b;font-weight:800;cursor:pointer}a{text-align:center;color:#e2e8f0;border:1px solid #334155;text-decoration:none}</style></head><body><main><h1>🔐 Verify access key</h1><p>Title pages are protected. One valid key unlocks <b>all pages</b> for the admin-configured time (e.g. 4 hours). Enter a key or get a new one.</p><form method="POST" action="/verify-key"><input type="hidden" name="target" value="${safeTarget}"><input name="key" placeholder="Enter access key" required autocomplete="off"><button type="submit">Open title page</button></form><a href="/get-key-start?target=${encodedTarget}">🔑 Get Key</a>${safeError}</main></body></html>`);
+  sendHtml(res, 200, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Key Verification · AniMovieszoneflix</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#090d18;color:#f8fafc;font:15px system-ui;padding:20px}main{width:min(420px,100%);padding:28px;border:1px solid #263449;border-radius:18px;background:#111827}h1{font-size:22px}p{color:#aab7ca;font-size:14px}input,button,a{width:100%;display:block;padding:13px;margin-top:12px;border-radius:10px;font:inherit}input{background:#0b1220;border:1px solid #334155;color:white}button{border:0;background:#38bdf8;color:#06111b;font-weight:800;cursor:pointer}a{text-align:center;color:#e2e8f0;border:1px solid #334155;text-decoration:none}</style></head><body><main><h1>🔐 Verify access key</h1><p>Title pages are protected. One valid key unlocks <b>all pages</b> for the admin-configured time (e.g. 4 hours). Enter a key or get a new one.</p><form method="POST" action="/verify-key"><input type="hidden" name="target" value="${safeTarget}"><input name="key" placeholder="Enter access key" required autocomplete="off"><button type="submit">Open title page</button></form><a href="/get-key-start?target=${encodedTarget}">🔑 Get Key</a>${safeError}</main></body></html>`);
 }
 function isJunkShortUrl(parsed, destination, providerHost) {
   const host = String(parsed.hostname || '').toLowerCase();
@@ -2857,7 +2866,7 @@ async function createVercelShortUrl(provider, destination) {
         redirect: 'manual',
         headers: {
           Accept: 'application/json, text/plain, */*',
-          'User-Agent': 'Mozilla/5.0 (compatible; AniMoviesZoneflix-Shortener/1.0)',
+          'User-Agent': 'Mozilla/5.0 (compatible; AniMovieszoneflix-Shortener/1.0)',
         },
       });
       const raw = (await response.text() || '').trim();
@@ -3521,7 +3530,7 @@ export default async function handler(req, res) {
           res,
           404,
           renderBaseLayout({
-            title: 'Title Not Found · AniMoviesZoneflix',
+            title: 'Title Not Found · AniMovieszoneflix',
             content: '<p class="muted" style="padding:48px 0;text-align:center">Title not found. <a href="/" style="color:var(--yellow)">Back to Home</a></p>',
           }),
         );
@@ -3574,7 +3583,7 @@ export default async function handler(req, res) {
       const transport = targetUrl.protocol === 'https:' ? https : http;
       const headers = {
         accept: req.headers.accept || '*/*',
-        'user-agent': req.headers['user-agent'] || 'AniMoviesZoneflix-Vercel-Gateway',
+        'user-agent': req.headers['user-agent'] || 'AniMovieszoneflix-Vercel-Gateway',
         host: targetUrl.host,
         'x-forwarded-host': req.headers.host || '',
         'x-forwarded-proto': 'https',
@@ -3739,7 +3748,7 @@ export default async function handler(req, res) {
     const transport = targetUrl.protocol === 'https:' ? https : http;
     const headers = {
       accept: req.headers.accept || '*/*',
-      'user-agent': req.headers['user-agent'] || 'AniMoviesZoneflix-Vercel-Gateway',
+      'user-agent': req.headers['user-agent'] || 'AniMovieszoneflix-Vercel-Gateway',
       host: targetUrl.host,
       'x-forwarded-host': req.headers.host || '',
       'x-forwarded-proto': 'https',

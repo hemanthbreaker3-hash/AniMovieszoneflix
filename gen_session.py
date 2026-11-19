@@ -15,7 +15,7 @@ async def generate_session():
         print("Error: API_ID or API_HASH not found in .env")
         return
 
-    print("WZGRAM / AniMoviesZoneflix Session Generator")
+    print("WZGRAM / AniMovieszoneflix Session Generator")
     print("--------------------------------")
     async with Client(
         name="gen_session",

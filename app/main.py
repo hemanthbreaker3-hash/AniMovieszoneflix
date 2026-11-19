@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Could not restore FileStore secondary bot: %s", e)
         if getattr(settings, "BASE_URL", None):
             os.environ["BASE_URL"] = str(settings.BASE_URL).rstrip("/")
-        logger.info("AniMoviesZoneflix service started (wzgram)")
+        logger.info("AniMovieszoneflix service started (wzgram)")
         yield
     finally:
         try:
@@ -90,10 +90,10 @@ async def lifespan(app: FastAPI):
         await stop_cloudflare_auto_tunnel()
         await session_manager.stop()
         mongo_client.close()
-        logger.info("AniMoviesZoneflix service stopped")
+        logger.info("AniMovieszoneflix service stopped")
 
 
-app = FastAPI(title="AniMoviesZoneflix Media & Anime Service", lifespan=lifespan)
+app = FastAPI(title="AniMovieszoneflix Media & Anime Service", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -216,7 +216,7 @@ async def health():
     vercel_url = await get_active_vercel_website_url()
     return {
         "status": "ok" if mongo_status == "ok" else "degraded",
-        "service": "AniMoviesZoneflix",
+        "service": "AniMovieszoneflix",
         "database": mongo_status,
         "telegram_sessions": sessions,
         "download_ready": mongo_status == "ok" and sessions > 0,

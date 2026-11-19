@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     SESSIONS: str = ""
     ADMIN_PANEL_TOKEN: str = ""
     TMDB_API_KEY: str = ""
-    BRANDING: str = "AniMoviesZoneflix"
+    BRANDING: str = "AniMovieszoneflix"
     LOGO_URL: str = ""
     STREAM_CHUNK_SIZE: int = 4194304
 

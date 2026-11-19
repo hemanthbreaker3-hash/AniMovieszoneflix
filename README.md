@@ -1,4 +1,4 @@
-# AniMoviesZoneflix — Telegram Media Bot + Vercel Website CMS
+# AniMovieszoneflix — Telegram Media Bot + Vercel Website CMS
 
 A Telegram media-link bot and responsive OTT-style website. The **Vercel website** serves the catalog, search, title pages, and admin control panel directly from shared **MongoDB** (so VPS firewall/IP rules never block website rendering), while **ngrok tunnel (`ngrok-free.app`)** handles all direct download links (`/dl/`), stream/watch links (`/watch/`, `/stream/`, `/remux/`), and title-page button URLs.
 
@@ -30,7 +30,7 @@ When you run `/baseurl` or `/backendurl` with a `https://*.ngrok-free.app` URL (
 
 ## 2. Deploy the Website to Vercel
 
-1. Import the repository into Vercel and set the Root Directory to `AniMoviesZoneflix-Main` (the folder containing `vercel.json`).
+1. Import the repository into Vercel and set the Root Directory to `AniMovieszoneflix-Main` (the folder containing `vercel.json`).
 2. Add your Environment Variables in Vercel:
    - `MONGODB_URI` — the exact same MongoDB Atlas connection string used by your VPS bot.
    - `DATABASE_NAME` — optional (auto-detects `tg_media_bot` / `animovieszoneflix` automatically if omitted).

@@ -1,4 +1,4 @@
-ANIMOVIESZONEFLIX — SINGLE VPS DEPLOYMENT
+AniMovieszoneflix — SINGLE VPS DEPLOYMENT
 
 1) Copy/paste the contents of deploy-one-command.sh into your VPS terminal,
    OR run it from the cloned project directory after obtaining the ZIP.
