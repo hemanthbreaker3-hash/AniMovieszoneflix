@@ -1539,9 +1539,27 @@ def register_handlers(bot):
                     "`Watch Now: https://...`"
                 )
             existing = list(page.get("groups") or [])
-            # Keep groups of the other box; replace same-box groups that match names or append
-            other_box = [g for g in existing if (g.get("box") or "watch") != box]
-            merged = other_box + new_groups
+            # /addgroups is append-only: preserve every previously saved group.
+            # Skip only exact duplicates (same box, normalized name, and buttons/URLs).
+            merged = list(existing)
+            def _group_signature(group):
+                group_box = (group.get("box") or "watch").strip().lower()
+                group_name = (group.get("name") or "").strip().casefold()
+                buttons = tuple(
+                    ((button.get("name") or button.get("text") or "").strip().casefold(),
+                     (button.get("url") or button.get("link") or "").strip())
+                    for button in (group.get("buttons") or [])
+                )
+                return group_box, group_name, buttons
+            existing_signatures = {_group_signature(group) for group in existing}
+            added_groups = []
+            for group in new_groups:
+                signature = _group_signature(group)
+                if signature in existing_signatures:
+                    continue
+                merged.append(group)
+                existing_signatures.add(signature)
+                added_groups.append(group)
             # Rewrite URLs to active Cloudflare base if configured
             cf = await get_active_cloudflare_url()
             if cf:
@@ -1554,12 +1572,14 @@ def register_handlers(bot):
                 {"$set": {"groups": merged, "updated_at": datetime.datetime.now(datetime.timezone.utc)}},
             )
             _awaiting_addgroups.pop(user.id, None)
-            total_btns = sum(len(g.get("buttons") or []) for g in new_groups)
+            total_btns = sum(len(g.get("buttons") or []) for g in added_groups)
             return await message.reply(
                 f"✅ **Groups saved** for `/{page_slug}`\n\n"
                 f"> Box: **{box.upper()}**\n"
-                f"> Groups added: `{len(new_groups)}`\n"
+                f"> Groups added: `{len(added_groups)}`\n"
+                f"> Existing groups kept: `{len(existing)}`\n"
                 f"> Buttons added: `{total_btns}`\n"
+                f"> Duplicate groups skipped: `{len(new_groups) - len(added_groups)}`\n"
                 f"> DB: `{target_db_name}`\n\n"
                 f"They are now live on the page Watch/Download section."
             )
