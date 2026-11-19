@@ -2120,10 +2120,8 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     document.head.appendChild(l);
   }
   addLink('preconnect', 'https://cdn.jsdelivr.net', { crossorigin: '' });
-  if (engine === 'wasm') {
-    addLink('modulepreload', CDN + 'element.slim.js');
-    addLink('preload', CDN + 'movi.wasm', { as: 'fetch', crossorigin: 'anonymous' });
-  }
+  addLink('modulepreload', CDN + 'element.slim.js');
+  addLink('preload', CDN + 'movi.wasm', { as: 'fetch', crossorigin: 'anonymous' });
 })();
 </script>
 <style>
@@ -2132,7 +2130,6 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 18px 48px rgba(0,0,0,.58),0 0 24px rgba(139,92,246,.16)}
     .player-box{background:#000;border-radius:18px;overflow:hidden;position:relative;z-index:1}
     .player-wrapper{width:100%;aspect-ratio:16/9;position:relative;background:#000;contain:paint}
-    .player-wrapper video,
     .player-wrapper movi-player{width:100%;height:100%;background:#000;object-fit:contain;display:block}
     movi-player{--movi-primary:#8b5cf6;--movi-primary-light:#a78bfa;--movi-accent:#22d3ee;--movi-brand-fill:linear-gradient(135deg,#8b5cf6,#22d3ee);--movi-glass-bg:rgba(10,10,20,.88);--movi-chrome-bg:rgba(10,10,20,.88);--movi-bar-bg:rgba(10,10,20,.88);--movi-chrome-fg:#f5f5f5;--movi-surface:#12122a}
     .player-chrome-btn{position:absolute;z-index:9;width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(6,6,12,.82);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(8px);padding:0;line-height:0}
@@ -2223,8 +2220,6 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
             subtitleedge="outline"
             style="display:none;width:100%;height:100%"
             tabindex="0"></movi-player>
-          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()">Buffering? Switch to basic player</button>
-          <video id="player" controls playsinline preload="auto" style="display:none;width:100%;height:100%;object-fit:contain;background:#000"></video>
           <div id="playerLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2">
             <div style="width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#8b5cf6;animation:ddspin .8s linear infinite"></div>
           </div>
@@ -2320,14 +2315,11 @@ const MOVI_GLOBAL = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element
 const MOVI_GLOBAL_FALLBACK = 'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js';
 
 const moviPlayer = document.getElementById('moviPlayer');
-const nativePlayer = document.getElementById('player') || document.getElementById('nativePlayer');
 const loadingEl = document.getElementById('playerLoading');
-const nativeSwitch = document.getElementById('nativeSwitch');
 
-let engine = CFG.engine || 'native';
-const forcedEngine = !!CFG.forced;
+let engine = 'movi';
+const forcedEngine = true;
 let wasmLoading = false, wasmLoaded = false, wasmWired = false;
-let nativeLoaded = false, browserMode = false;
 
 function hideLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.remove('active'); loadingEl.style.display = 'none'; } }
 function showLoading(){ if (loadingEl) { loadingEl.classList && loadingEl.classList.add('active'); loadingEl.style.display = 'flex'; } }
@@ -2359,59 +2351,6 @@ function warmMedia(url) {
       })
       .catch(() => {});
   } catch (_) {}
-}
-
-function initNative(reason) {
-  engine = 'native';
-  if (moviPlayer) moviPlayer.style.display = 'none';
-  if (nativePlayer) {
-    nativePlayer.style.display = 'block';
-    try { nativePlayer.removeAttribute('crossorigin'); } catch (_) {}
-    if (!nativeLoaded) {
-      nativeLoaded = true;
-      nativePlayer.preload = 'auto';
-      nativePlayer.playsInline = true;
-      nativePlayer.setAttribute('playsinline', '');
-      nativePlayer.setAttribute('webkit-playsinline', '');
-      nativePlayer.src = FILE_URL;
-      try { nativePlayer.load(); } catch (_) {}
-      // Playback is user-gesture aware; never force an autoplay retry loop.
-      nativePlayer.addEventListener('error', () => {
-        if (!nativePlayer.dataset.remuxTried && nativePlayer.src.indexOf('/remux/') === -1) {
-          nativePlayer.dataset.remuxTried = '1';
-          const resumeAt = Number(nativePlayer.currentTime || 0);
-          nativePlayer.src = REMUX_URL;
-          nativePlayer.load();
-          if (resumeAt > 0) nativePlayer.addEventListener('loadedmetadata', () => {
-            try { nativePlayer.currentTime = resumeAt; } catch (_) {}
-          }, { once: true });
-        } else {
-          hideLoading();
-          showToast('Cannot play this format — use Download or an external player');
-        }
-      });
-      nativePlayer.addEventListener('waiting', () => {
-        showLoading();
-        clearTimeout(nativePlayer._bufferHideTimer);
-        nativePlayer._bufferHideTimer = setTimeout(() => {
-          if (nativePlayer.readyState >= 3) hideLoading();
-        }, 12000);
-      });
-      nativePlayer.addEventListener('playing', () => {
-        clearTimeout(nativePlayer._bufferHideTimer);
-        hideLoading();
-      });
-      nativePlayer.addEventListener('canplay', hideLoading);
-      nativePlayer.addEventListener('stalled', () => {
-        // Let the browser continue its byte-range request; show a non-blocking status only.
-        console.debug('[player] network stalled; waiting for stream range response');
-      });
-    }
-  }
-  nativePlayer && nativePlayer.addEventListener('playing', hideLoading, { once: true });
-  nativePlayer && nativePlayer.addEventListener('canplay', hideLoading, { once: true });
-  if (reason) console.debug('[player] native:', reason);
-  setTimeout(hideLoading, 12000);
 }
 
 function startMoviAutoplay() {
@@ -2447,79 +2386,48 @@ function startWasm() {
     wasmWired = true;
     moviPlayer.addEventListener('playing', hideLoading);
     moviPlayer.addEventListener('canplay', hideLoading);
-    moviPlayer.addEventListener('error', () => { if (!forcedEngine) initNative('wasm-error'); });
-    moviPlayer.addEventListener('nativefallback', () => { if (!forcedEngine) initNative('nativefallback'); });
+    moviPlayer.addEventListener('waiting', showLoading);
+    moviPlayer.addEventListener('stalled', showLoading);
+    moviPlayer.addEventListener('error', () => { hideLoading(); showToast('Movi Player could not load this stream. Please retry.'); });
   }
-  if (moviPlayer) {
-    moviPlayer.style.display = 'block';
-    if (nativePlayer) nativePlayer.style.display = 'none';
-    if (!wasmLoaded) {
-      wasmLoaded = true;
-      moviPlayer.src = FILE_URL;
-      try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
-    }
-    startMoviAutoplay();
+  if (!moviPlayer) { hideLoading(); showToast('Movi Player element is missing'); return; }
+  moviPlayer.style.display = 'block';
+  if (!wasmLoaded) {
+    wasmLoaded = true;
+    moviPlayer.src = FILE_URL;
+    try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
   }
-  setTimeout(hideLoading, 15000);
+  startMoviAutoplay();
 }
 
 function loadGlobalScript(src) {
   return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src; s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('fail'));
+    const s = document.createElement('script'); s.src = src; s.async = true;
+    s.onload = () => resolve(); s.onerror = () => reject(new Error('Movi Player CDN load failed'));
     document.head.appendChild(s);
   });
 }
 
-function initWasm() {
-  if (wasmLoading) return;
-  wasmLoading = true;
-  const timer = setTimeout(() => {
-    if (!forcedEngine) initNative('module-timeout');
-    else { hideLoading(); showToast('Player timed out'); }
-  }, 45000);
-
-  import(MODULE_URL).then(() => {
-    clearTimeout(timer);
-    wasmLoading = false;
-    if (!customElements.get('movi-player')) {
-      if (!forcedEngine) initNative('element-missing');
-      return;
-    }
+async function initWasm() {
+  if (wasmLoading || wasmLoaded) return;
+  wasmLoading = true; showLoading();
+  try {
+    try { await loadGlobalScript(MOVI_GLOBAL); }
+    catch (e) { console.warn('Movi primary CDN failed; trying same-player CDN fallback', e); await loadGlobalScript(MOVI_GLOBAL_FALLBACK); }
+    await customElements.whenDefined('movi-player');
+    if (!customElements.get('movi-player')) throw new Error('movi-player custom element unavailable');
     startWasm();
-  }).catch(() => {
-    return loadGlobalScript(MOVI_GLOBAL).catch(() => loadGlobalScript(MOVI_GLOBAL_FALLBACK)).then(async () => {
-      clearTimeout(timer);
-      wasmLoading = false;
-      try { await customElements.whenDefined('movi-player'); } catch (_) {}
-      if (!customElements.get('movi-player')) {
-        if (!forcedEngine) initNative('element-missing');
-        return;
-      }
-      startWasm();
-    });
-  }).catch(() => {
-    clearTimeout(timer);
-    wasmLoading = false;
-    if (!forcedEngine) initNative('module-load-failed');
-    else { hideLoading(); showToast('Could not load player'); }
-  });
+  } catch (err) {
+    console.error('[player] Movi Player initialization failed', err);
+    hideLoading(); showToast('Movi Player failed to initialize. Check your connection and retry.');
+  } finally { wasmLoading = false; }
 }
 
-function switchEngine() {
-  if (engine !== 'wasm' || browserMode) return;
-  try { moviPlayer.pause(); } catch (e) {}
-  initNative('user-switch');
-  showToast('Basic player');
-}
+function switchEngine() { showToast('Movi Player is the only built-in player.'); }
 
-// Boot like DDStream: wasm first when WebGL2 available
+// Movi Player is the sole built-in playback engine.
 showLoading();
-if (engine === 'wasm') { initWasm(); }
-else initNative(forcedEngine ? 'forced-native' : 'native-first');
-setTimeout(() => { if (engine === 'wasm' && nativeSwitch) nativeSwitch.hidden = false; }, 12000);
+initWasm();
 
 const dlBtn = document.getElementById('direct-dl-btn');
 if (dlBtn) dlBtn.href = DL_URL;

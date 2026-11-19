@@ -49,7 +49,6 @@
     background:#000;
     contain:paint;
   }
-  .player-wrapper video,
   .player-wrapper movi-player{
     width:100%;height:100%;background:#000;object-fit:contain;display:block;
   }
@@ -79,15 +78,6 @@
   }
   @keyframes dd-spin{to{transform:rotate(360deg)}}
 
-  .native-switch{
-    display:block;position:absolute;bottom:14px;right:14px;z-index:8;
-    width:38px;height:38px;padding:0;text-align:center;font-size:18px;font-weight:700;color:#f5f5f5;
-    background:rgba(6,6,10,.78);border:1px solid rgba(255,255,255,.16);
-    border-radius:50%;cursor:pointer;white-space:nowrap;
-    transition:color .2s,background .2s;
-  }
-  .native-switch:hover{color:#fff;background:rgba(6,6,10,.95)}
-  .native-switch[hidden]{display:none}
 
   /* ===== Built-in player chrome overlays ===== */
   .player-chrome-btn{
@@ -289,8 +279,6 @@
      We use the global build so we can load it dynamically without type=module. */
   var CDN = 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/';
   var OFFICIAL = 'https://cdn.jsdelivr.net/npm/movi-player/dist/';
-  var params = new URLSearchParams(window.location.search);
-  var forced = params.get('engine');
   var canWasm = false, hasWebCodecs = false, secure = false;
   try {
     secure = !!window.isSecureContext;
@@ -298,18 +286,7 @@
     canWasm = !!document.createElement('canvas').getContext('webgl2');
   } catch (e) { canWasm = false; }
 
-  var engine;
-  if (forced === 'wasm' || forced === 'native') engine = forced;
-  else {
-    var path = (window.location.pathname || '').toLowerCase();
-    var isMkv = /\\.mkv(?:$|[?#])/.test(path) || /mkv/i.test(document.title || '');
-    engine = 'wasm'; // Movi Player is the built-in default for every supported format.
-  }
-
-  try {
-    var pref = localStorage.getItem('AniMoviesZoneflix:engine');
-    if (!forced) engine = 'wasm'; // Ignore stale engine preferences; keep native available only as fallback/manual override.
-  } catch (_) {}
+  var engine = 'movi'; // Movi Player is the only built-in playback engine.
 
   window.__AniMoviesZoneflixPlayer = {
     initial: engine,
@@ -326,7 +303,7 @@
     moduleScript: OFFICIAL + 'element.js'
   };
 
-  if (engine === 'wasm') {
+  if (engine === 'movi') {
     var addLink = function (rel, href, attrs) {
       var l = document.createElement('link');
       l.rel = rel; l.href = href;
@@ -403,9 +380,7 @@
             style="display:block"
             class="movi-bar-collapsed"
             tabindex="0"></movi-player>
-          <video id="nativePlayer" playsinline controls autoplay preload="auto" crossorigin="anonymous" style="display:none"></video>
           <div class="player-loading" id="playerLoading"><div class="spinner"></div></div>
-          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()" aria-label="Switch player" title="Switch player">⇄</button>
 
           <!-- Top-left: switch qualities in current group -->
           <button type="button" class="player-chrome-btn pc-switch" id="pcSwitchBtn" title="Switch quality / source" aria-label="Switch source">
@@ -457,12 +432,6 @@
         <span id="track-status" class="track-status"></span>
       </div>
 
-      <div class="volume-tools" id="native-only-tools" style="display:none">
-        <label for="volume-boost">Volume boost <b id="volume-value">100%</b></label>
-        <input id="volume-boost" type="range" min="100" max="300" step="10" value="100" aria-label="Volume boost up to 300 percent">
-        <label for="brightness">Brightness <b id="brightness-value">100%</b></label>
-        <input id="brightness" type="range" min="50" max="150" step="5" value="100" aria-label="Screen brightness">
-      </div>
 
       <div class="tools">
         {% if player_settings.downloads_enabled %}
@@ -534,27 +503,17 @@ const CFG = window.__AniMoviesZoneflixPlayer || {};
 /* Official movi-player entry points (https://github.com/mrujjwalg/movi-player) */
 const MOVI_GLOBAL = CFG.script || 'https://cdn.jsdelivr.net/npm/movi-player@0.4.1/dist/element.global.js';
 const MOVI_GLOBAL_FALLBACK = CFG.scriptFallback || 'https://cdn.jsdelivr.net/npm/movi-player/dist/element.global.js';
-const PLYR_CSS = 'https://cdn.plyr.io/3.7.8/plyr.css';
-const PLYR_JS  = 'https://cdn.plyr.io/3.7.8/plyr.polyfilled.js';
 
 const playerWrapper = document.getElementById('playerWrapper');
 const moviPlayer    = document.getElementById('moviPlayer');
-const nativePlayer  = document.getElementById('nativePlayer');
 const loadingScreen = document.getElementById('playerLoading');
-const nativeSwitch  = document.getElementById('nativeSwitch');
-const nativeTools   = document.getElementById('native-only-tools');
-const fixAudioBtn   = document.getElementById('fix-audio-btn');
 
-let engine = CFG.engine || 'native';
-const forcedEngine = !!CFG.forced;
-let plyr = null;
+let engine = 'movi';
+const forcedEngine = true;
 let loadingDone = false;
 let wasmLoading = false;
 let wasmLoaded = false;
 let wasmWired = false;
-let nativeLoaded = false;
-let nativeWired = false;
-let browserMode = false;
 let switchAt = 0;
 let switchPlaying = false;
 let hasPlayedOnce = false;
@@ -574,13 +533,9 @@ function showToast(msg) {
 }
 function showLoading() { if (loadingScreen) loadingScreen.classList.add('active'); }
 function hideLoading() { if (loadingScreen) loadingScreen.classList.remove('active'); loadingDone = true; }
-function setEngine(e) {
-  engine = e;
-  try { localStorage.setItem('ddstream:engine', e); } catch (_) {}
-}
-function activeMedia() {
-  return (engine === 'wasm' && !browserMode) ? moviPlayer : nativePlayer;
-}
+function setEngine(e) { engine = 'movi'; }
+function activeMedia() { return moviPlayer; }
+
 function captureSwitchPosition() {
   try {
     const el = activeMedia();
@@ -941,287 +896,57 @@ document.addEventListener('click', () => {
   render();
 })();
 
-/* ===== Native (basic) player + remux multi-audio (fallback) ===== */
-function primaryPlayUrl(audioIndex) {
-  const idx = (audioIndex === undefined || audioIndex === null) ? 0 : Number(audioIndex);
-  if (useCompatible || idx !== 0) {
-    return REMUX_URL + '?audio=' + encodeURIComponent(idx) + '&aac=1';
-  }
-  return STREAM_URL;
-}
+/* ===== Movi-only playback ===== */
+function primaryPlayUrl() { return STREAM_URL; }
 
-function setNativeSource(src, mime) {
-  nativePlayer.pause();
-  nativePlayer.removeAttribute('src');
-  nativePlayer.src = src;
-  nativePlayer.load();
-  const t = switchAt || 0;
-  if (t > 1) {
-    const onMeta = function () {
-      nativePlayer.removeEventListener('loadedmetadata', onMeta);
-      try { nativePlayer.currentTime = t; } catch (_) {}
-      if (switchPlaying) nativePlayer.play().catch(() => {});
-    };
-    nativePlayer.addEventListener('loadedmetadata', onMeta);
-  }
-}
-
-async function loadTracks() {
-  try {
-    const r = await fetch(TRACKS_URL, { credentials: 'same-origin' });
-    if (!r.ok) return;
-    const d = await r.json();
-    const tracks = d.audio_tracks || [];
-    if (tracks.length < 2) return;
-
-    const box = document.getElementById('track-box');
-    const sel = document.getElementById('audio-select');
-    if (!box || !sel) return;
-    box.style.display = 'flex';
-    sel.innerHTML = '';
-    tracks.forEach(t => {
-      const o = document.createElement('option');
-      o.value = t.audio_index;
-      o.textContent = t.label || `Track ${t.audio_index + 1}`;
-      sel.appendChild(o);
-    });
-    sel.value = String(currentAudioIndex);
-    sel.onchange = () => {
-      const idx = Number(sel.value);
-      if (idx !== currentAudioIndex) switchAudio(idx);
-    };
-    const statusEl = document.getElementById('track-status');
-    if (statusEl) statusEl.textContent = 'Select audio track (basic player / remux)';
-  } catch (e) {
-    console.debug('Track discovery unavailable', e);
-  }
-}
-
-async function switchAudio(index) {
-  if (switchingAudio || engine === 'wasm') return; // WASM has its own track UI
-  switchingAudio = true;
-  const statusEl = document.getElementById('track-status');
-  const sel = document.getElementById('audio-select');
-  const idx = Number(index);
-  if (statusEl) statusEl.textContent = 'Preparing selected audio…';
-  try {
-    const src = (useCompatible || idx !== 0)
-      ? REMUX_URL + '?audio=' + encodeURIComponent(idx) + '&aac=1'
-      : STREAM_URL;
-    setNativeSource(src);
-    currentAudioIndex = idx;
-    if (statusEl) {
-      statusEl.textContent = (useCompatible || idx !== 0)
-        ? 'Remux / AAC track ' + (idx + 1)
-        : 'Default audio · full seeking';
-    }
-  } catch (err) {
-    console.warn('Audio track switch failed', err);
-    if (statusEl) statusEl.textContent = 'Track failed';
-  } finally {
-    switchingAudio = false;
-  }
-}
-
-function enableCompatibleMode() {
-  useCompatible = true;
-  if (engine === 'native' || browserMode) {
-    switchAudio(currentAudioIndex || 0);
-  }
-  showToast('Compatible AAC mode enabled');
-}
-
-/* ===== Engine init ===== */
-function showNativeSwitch() {
-  if (nativeSwitch && !forcedEngine) nativeSwitch.hidden = false;
-}
-
+/* ===== Movi Player only: no native/Plyr/basic-player fallback ===== */
 function wireStallWatch() {
-  const el = moviPlayer;
-  el.addEventListener('playing', () => { hasPlayedOnce = true; clearStallWatch(); });
-  el.addEventListener('canplay', clearStallWatch);
-  el.addEventListener('waiting', () => {
-    if (browserMode || !hasPlayedOnce || stallTimer) return;
-    stallTimer = setTimeout(() => {
-      stallTimer = null;
-      if (!browserMode && !moviPlayer.paused) showNativeSwitch();
-    }, 6000);
+  moviPlayer.addEventListener('playing', () => { hasPlayedOnce = true; clearStallWatch(); hideLoading(); });
+  moviPlayer.addEventListener('canplay', () => { clearStallWatch(); hideLoading(); });
+  moviPlayer.addEventListener('waiting', () => {
+    showLoading();
+    clearStallWatch();
+    stallTimer = setTimeout(() => { stallTimer = null; showToast('Still buffering. Please wait or retry playback.'); }, 12000);
   });
+  moviPlayer.addEventListener('stalled', () => showLoading());
+  moviPlayer.addEventListener('error', () => { hideLoading(); showToast('Movi Player could not load this stream. Please retry.'); });
 }
-function clearStallWatch() {
-  if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
-}
-
-function handOffToBrowser() {
-  // Last-resort: give the original stream to the native <video>
-  try {
-    nativePlayer.style.display = 'block';
-    moviPlayer.style.display = 'none';
-    setNativeSource(STREAM_URL, PLAYER_MIME || 'video/mp4');
-    if (nativeTools) nativeTools.style.display = 'flex';
-    if (fixAudioBtn) fixAudioBtn.style.display = '';
-    loadTracks();
-    setEngine('native');
-    return true;
-  } catch (e) { return false; }
-}
-
-function initNative(reason) {
-  if (nativeLoaded) {
-    nativePlayer.style.display = 'block';
-    moviPlayer.style.display = 'none';
-    applySwitchPosition(nativePlayer);
-    hideLoading();
-    return;
-  }
-  nativeLoaded = true;
-  setEngine('native');
-  nativePlayer.style.display = 'block';
-  moviPlayer.style.display = 'none';
-  if (nativeTools) nativeTools.style.display = 'flex';
-  if (fixAudioBtn) fixAudioBtn.style.display = '';
-  setNativeSource(primaryPlayUrl(0), useCompatible ? 'video/mp4' : (PLAYER_MIME || 'video/mp4'));
-  requestAutoPlay(nativePlayer);
-  loadTracks();
-  hideLoading();
-  if (nativeSwitch) nativeSwitch.hidden = true;
-  console.debug('Native player started:', reason || 'default');
-}
-
+function clearStallWatch() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
 function loadScript(src) {
   return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src; s.async = true;
-    s.onload = resolve; s.onerror = reject;
-    document.head.appendChild(s);
+    const s = document.createElement('script'); s.src = src; s.async = true;
+    s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
   });
 }
-
 async function initWasm() {
-  if (wasmLoading) return;
-  wasmLoading = true;
-  showLoading();
-
-  const timer = setTimeout(() => {
-    if (!forcedEngine) initNative('module-timeout');
-    else { hideLoading(); showToast('Player engine timed out'); }
-  }, 45000);
-
+  if (wasmLoading || wasmLoaded) return;
+  wasmLoading = true; showLoading();
   try {
-    /* Official movi-player load (https://github.com/mrujjwalg/movi-player) */
-    try {
-      await loadScript(MOVI_GLOBAL);
-    } catch (e1) {
-      console.warn('Primary movi-player CDN failed, trying fallback', e1);
-      await loadScript(MOVI_GLOBAL_FALLBACK);
-    }
-    clearTimeout(timer);
-
-    // Custom element should now be defined
-    if (!customElements.get('movi-player')) {
-      throw new Error('movi-player custom element not defined after script load');
-    }
-
-    setEngine('wasm');
+    try { await loadScript(MOVI_GLOBAL); }
+    catch (e) { console.warn('Movi primary CDN failed; trying same-player CDN fallback', e); await loadScript(MOVI_GLOBAL_FALLBACK); }
+    await customElements.whenDefined('movi-player');
+    if (!customElements.get('movi-player')) throw new Error('movi-player custom element unavailable');
+    setEngine('movi');
+    if (!wasmWired) { wasmWired = true; wireStallWatch(); }
     moviPlayer.style.display = 'block';
-    nativePlayer.style.display = 'none';
-
-    // Wire events once
-    if (!wasmWired) {
-      wasmWired = true;
-      wireStallWatch();
-      moviPlayer.addEventListener('error', () => {
-        if (!forcedEngine) {
-          captureSwitchPosition();
-          initNative('wasm-error');
-        }
-      });
-      moviPlayer.addEventListener('playing', () => hideLoading());
-      moviPlayer.addEventListener('canplay', () => hideLoading());
-    }
-
-    if (!wasmLoaded) {
-      wasmLoaded = true;
-      moviPlayer.src = STREAM_URL;
-      try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
-      requestAutoPlay(moviPlayer);
-    } else {
-      applySwitchPosition(moviPlayer);
-    }
+    moviPlayer.setAttribute('playsinline','');
+    moviPlayer.setAttribute('controls','');
+    moviPlayer.setAttribute('autoplay','');
+    moviPlayer.setAttribute('muted','');
+    moviPlayer.muted = true;
+    moviPlayer.src = STREAM_URL;
+    if (typeof moviPlayer.load === 'function') moviPlayer.load();
+    wasmLoaded = true;
+    requestAutoPlay(moviPlayer);
+    [1200, 3000, 6000].forEach(ms => setTimeout(() => { if (moviPlayer.paused) requestAutoPlay(moviPlayer); }, ms));
   } catch (err) {
-    clearTimeout(timer);
-    console.warn('WASM player failed to load', err);
-    if (!forcedEngine) initNative('wasm-load-fail');
-    else { hideLoading(); showToast('Enhanced player unavailable'); }
-  }
+    console.error('Movi Player initialization failed', err);
+    hideLoading(); showToast('Movi Player failed to initialize. Check your connection and retry.');
+  } finally { wasmLoading = false; }
 }
+function switchEngine() { showToast('Movi Player is the only built-in player.'); }
 
-function switchEngine() {
-  if (engine !== 'wasm' || browserMode) return;
-  captureSwitchPosition();
-  try { moviPlayer.pause(); } catch (e) {}
-  if (handOffToBrowser()) {
-    browserMode = true;
-    if (nativeSwitch) nativeSwitch.hidden = true;
-    showToast('Browser player');
-    return;
-  }
-  initNative('user-switch');
-  showToast('Player switched');
-}
-
-/* ===== Volume boost + brightness (native only) ===== */
-let audioContext, gainNode, compressor, mediaSourceNode;
-let boost = 1, brightness = 1;
-const boostInput = document.getElementById('volume-boost');
-const brightnessInput = document.getElementById('brightness');
-const volumeValue = document.getElementById('volume-value');
-const brightnessValue = document.getElementById('brightness-value');
-
-async function setupAudioBoost() {
-  if (engine === 'wasm') return;
-  if (audioContext) {
-    if (audioContext.state === 'suspended') {
-      try { await audioContext.resume(); } catch (_) {}
-    }
-    return;
-  }
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    audioContext = new Ctx();
-    mediaSourceNode = audioContext.createMediaElementSource(nativePlayer);
-    gainNode = audioContext.createGain();
-    compressor = audioContext.createDynamicsCompressor();
-    mediaSourceNode.connect(gainNode);
-    gainNode.connect(compressor);
-    compressor.connect(audioContext.destination);
-    await audioContext.resume();
-  } catch (e) { console.debug('Audio boost unavailable', e); }
-}
-function updateGain() {
-  if (gainNode && audioContext) {
-    try { gainNode.gain.setTargetAtTime(boost, audioContext.currentTime, 0.04); } catch (_) {}
-  }
-  if (volumeValue) volumeValue.textContent = Math.round(boost * 100) + '%';
-}
-function updateBrightness() {
-  if (nativePlayer) nativePlayer.style.filter = `brightness(${brightness})`;
-  if (brightnessValue) brightnessValue.textContent = Math.round(brightness * 100) + '%';
-}
-if (boostInput) {
-  boostInput.addEventListener('input', () => {
-    boost = Number(boostInput.value) / 100;
-    updateGain();
-  });
-}
-if (brightnessInput) {
-  brightnessInput.addEventListener('input', () => {
-    brightness = Number(brightnessInput.value) / 100;
-    updateBrightness();
-  });
-}
-nativePlayer.addEventListener('play', setupAudioBoost, { once: true });
+/* Volume and brightness are controlled by Movi Player's own controls. */
 
 /* ===== Resume position (shared) ===== */
 const RESUME_ID = SHORT_CODE;
@@ -1247,11 +972,7 @@ if (savedPos > 5) {
   // Will be applied after metadata
 }
 
-if (engine === 'wasm') {
-  initWasm();
-} else {
-  initNative('bootstrap');
-}
+initWasm();
 
 {% if player_settings.auto_player_redirect %}
 (function autoPlayerChooser(){
@@ -1282,8 +1003,6 @@ if (engine === 'wasm') {
       if (counter && Number.isFinite(data.views)) counter.textContent = data.views.toLocaleString() + ' views';
     } catch (_) {}
   }
-  const native = document.getElementById('nativePlayer');
-  if (native) native.addEventListener('play', registerPlaybackView, {once:true});
   const custom = document.getElementById('moviPlayer');
   if (custom) { custom.addEventListener('play', registerPlaybackView, {once:true}); custom.addEventListener('playing', registerPlaybackView, {once:true}); }
 })();
