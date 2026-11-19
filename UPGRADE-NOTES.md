@@ -41,3 +41,7 @@ Admins can now delete a catalog page directly from the private bot chat without 
 - `/del Exact Page Title`
 
 The command only accepts an exact slug or exact case-insensitive title match. Partial/fuzzy matches are not deleted, and ambiguous title matches are rejected. It removes the matching document from the shared MongoDB `catalog_pages` collection, so public catalog queries stop returning it.
+
+## Automatic web-container replacement
+
+Run `./fix-containerconfig.sh` from the extracted project directory. It detects Docker Compose V2 when available, removes only old Compose-labeled `web` containers for this project, rebuilds the web image, and starts the replacement. It does not remove Redis, named volumes, or database data. It prints container status and recent logs. If the project directory name differs from the Compose project name, set `COMPOSE_PROJECT_NAME` before running.
