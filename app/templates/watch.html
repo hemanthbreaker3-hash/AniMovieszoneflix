@@ -5,11 +5,11 @@
   {% if not player_settings.built_in_player_enabled %}.player-shell,.card.info{display:none!important}{% endif %}{% if not player_settings.streaming_enabled %}.player-shell{display:none!important}{% endif %}
 
   :root {
-    --blue: #ff6a00;
-    --blue-glow: #ff9b42;
+    --blue: #8b5cf6;
+    --blue-glow: #22d3ee;
     --line2: #2a2a3a;
     --neon-blue: 0 0 12px rgba(255,106,0,.45);
-    --red-glow: #ff9b42;
+    --red-glow: #22d3ee;
   }
 
   /* ===== Player shell (keeps project neon look) ===== */
@@ -19,11 +19,11 @@
     padding:2px;
     overflow:hidden;
     background:#0a0a14;
-    box-shadow:0 18px 48px rgba(0,0,0,.58),0 0 24px rgba(255,106,0,.16);
+    box-shadow:0 18px 48px rgba(0,0,0,.58),0 0 24px rgba(139,92,246,.16);
   }
   .player-shell .neon-ribbon{
     position:absolute;inset:-40%;
-    background:conic-gradient(from 0deg,#ff6a00,#ffb36f,#ff6a00,#ff9b42,#8b4acb,#ff6a00);
+    background:conic-gradient(from 0deg,#8b5cf6,#22d3ee,#8b5cf6,#22d3ee,#8b4acb,#8b5cf6);
     animation:ribbon-rotate 14s linear infinite;z-index:0;pointer-events:none;
   }
   @keyframes ribbon-rotate{to{transform:rotate(360deg)}}
@@ -55,10 +55,10 @@
   }
   movi-player{
     /* Theme to project blue neon */
-    --movi-primary:#ff6a00;
-    --movi-primary-light:#ff9b42;
-    --movi-accent:#ffb36f;
-    --movi-brand-fill:linear-gradient(135deg,#ff6a00,#ffb36f);
+    --movi-primary:#8b5cf6;
+    --movi-primary-light:#22d3ee;
+    --movi-accent:#22d3ee;
+    --movi-brand-fill:linear-gradient(135deg,#8b5cf6,#22d3ee);
     --movi-glass-bg:rgba(10,10,20,.88);
     --movi-chrome-bg:rgba(10,10,20,.88);
     --movi-bar-bg:rgba(10,10,20,.88);
@@ -74,7 +74,7 @@
   .player-loading.active{opacity:1}
   .player-loading .spinner{
     width:42px;height:42px;border-radius:50%;
-    border:3px solid rgba(255,255,255,.18);border-top-color:#ff6a00;
+    border:3px solid rgba(255,255,255,.18);border-top-color:#8b5cf6;
     animation:dd-spin .8s linear infinite;
   }
   @keyframes dd-spin{to{transform:rotate(360deg)}}
@@ -104,7 +104,7 @@
   .pc-download{top:12px;right:12px}
   .player-pop{
     position:absolute;z-index:12;min-width:160px;max-width:min(280px,86vw);
-    background:rgba(10,10,20,.96);border:1px solid rgba(255,106,0,.35);
+    background:rgba(10,10,20,.96);border:1px solid rgba(139,92,246,.35);
     border-radius:14px;padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.55);
     display:none;flex-direction:column;gap:4px;backdrop-filter:blur(12px);
   }
@@ -116,14 +116,14 @@
     color:#f5f5f5;padding:10px 12px;border-radius:10px;font:600 13px var(--font,system-ui);
     cursor:pointer;text-decoration:none;
   }
-  .player-pop button:hover,.player-pop a:hover{background:rgba(255,106,0,.18)}
+  .player-pop button:hover,.player-pop a:hover{background:rgba(139,92,246,.18)}
   .player-pop .pop-title{font-size:11px;color:#9ca3af;padding:4px 12px 6px;text-transform:uppercase;letter-spacing:.06em}
 
   .nav-row{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
   }
   .nav-row .nav-btn{
-    background:linear-gradient(180deg,#14142c,#0e0e20);border:1px solid var(--line2);
+    background:linear-gradient(180deg,#172033,#101621);border:1px solid var(--line2);
     color:#fff;border-radius:12px;padding:10px 16px;font:700 13px var(--font,system-ui);
     cursor:pointer;transition:border-color .2s,box-shadow .2s;
   }
@@ -142,7 +142,7 @@
   .related-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
   .related-card{
     display:block;text-decoration:none;color:inherit;border-radius:14px;overflow:hidden;
-    border:1px solid var(--line2);background:#0c0c18;transition:border-color .2s,transform .15s;
+    border:1px solid var(--line2);background:#111722;transition:border-color .2s,transform .15s;
   }
   .related-card:hover{border-color:var(--blue);transform:translateY(-2px)}
   .related-card .thumb{
@@ -152,8 +152,8 @@
     content:"▶";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(0,0,0,.35);font-size:22px;opacity:.9;
   }
-  .related-card .meta-line{padding:8px 10px;font-size:12px;font-weight:600;line-height:1.3}
-  .related-card.active{border-color:#ff6a00;box-shadow:0 0 0 1px rgba(255,106,0,.35)}
+  .related-card .meta-line{padding:9px 10px;font-size:13px;font-weight:700;line-height:1.3;display:flex;flex-direction:column;gap:3px}.quality-count{color:#22d3ee;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.season-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px}.season-tabs button{border:1px solid rgba(148,163,184,.18);background:#111722;color:#9ca3af;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer}.season-tabs button.active{background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.4);color:#c4b5fd}
+  .related-card.active{border-color:#8b5cf6;box-shadow:0 0 0 1px rgba(139,92,246,.35)}
   .related-pager{display:flex;align-items:center;gap:8px;margin-top:12px;justify-content:center}
   .related-pager[hidden]{display:none!important}
   .related-pager button{
@@ -162,7 +162,7 @@
   }
   .related-pager button:disabled{opacity:.4;cursor:not-allowed}
   .related-pager span{color:var(--muted,#9ca3af);font-size:13px}
-  .related-pager button.active{background:linear-gradient(125deg,#ff6a00,#ffb74d);border-color:transparent;color:#180b02;font-weight:900}
+  .related-pager button.active{background:linear-gradient(125deg,#8b5cf6,#22d3ee);border-color:transparent;color:#071018;font-weight:900}
   .episode-tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
   .episode-tools input,.episode-tools select{min-height:40px;border:1px solid var(--line2);border-radius:10px;background:#0d0d16;color:#fff;padding:8px 12px;outline:none}
   .episode-tools input{flex:1;min-width:160px}
@@ -189,7 +189,7 @@
   .player-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
   .pbtn{
     min-height:46px;border:1px solid var(--line);border-radius:12px;
-    background:linear-gradient(180deg,#14142c,#0e0e20);color:#fff;
+    background:linear-gradient(180deg,#172033,#101621);color:#fff;
     display:flex;align-items:center;justify-content:center;text-align:center;
     padding:10px;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .15s;font-size:13px;
   }
@@ -220,7 +220,7 @@
   .volume-tools input[type=range]{flex:1;min-width:120px;accent-color:var(--blue);height:6px}
   .notice{
     padding:11px 13px;border-radius:11px;background:rgba(59,130,246,.06);
-    border:1px solid rgba(255,106,0,.18);color:var(--muted);font-size:12px;margin-top:12px;
+    border:1px solid rgba(139,92,246,.18);color:var(--muted);font-size:12px;margin-top:12px;
   }
   .track-status{font-size:12px;color:var(--muted);margin-left:8px}
   .track-status.error{color:var(--red-glow)}
@@ -240,8 +240,8 @@
   }
   .toast.active{opacity:1;transform:translateX(-50%) translateY(0)}
   .btn.accent{
-    background:linear-gradient(135deg,#ff6a00,#2563eb);
-    border-color:#ff6a00;color:#fff;
+    background:linear-gradient(135deg,#8b5cf6,#2563eb);
+    border-color:#8b5cf6;color:#fff;
   }
   .btn.accent:hover{filter:brightness(1.08);box-shadow:0 0 14px rgba(59,130,246,.4)}
 </style>
@@ -361,7 +361,7 @@
         <div class="player-wrapper" id="playerWrapper">
           <movi-player id="moviPlayer"
             playsinline controls preload="auto" resume
-            theme="dark" themecolor="#ff6a00"
+            theme="dark" themecolor="#8b5cf6"
             subtitleedge="outline"
             style="display:block"
             class="movi-bar-collapsed"
@@ -446,7 +446,7 @@
     <div class="related-groups card" style="margin-top:14px;padding:16px">
       <h3>Episodes / groups</h3>
       <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episode (S01E01)…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Filter season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div>
-      <div class="related-grid" id="relatedGrid"></div>
+      <div class="season-tabs" id="seasonTabs" aria-label="Season shortcuts"></div><div class="related-grid" id="relatedGrid"></div>
       <div class="related-pager" id="relatedPager" hidden></div>
     </div>
     {% endif %}
@@ -754,7 +754,9 @@ document.addEventListener('click', () => {
   };
   const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))];
   seasons.sort((a,b) => a === 'Other' ? 1 : b === 'Other' ? -1 : Number(a.replace(/\D/g,'')) - Number(b.replace(/\D/g,'')));
+  const seasonTabs=document.getElementById('seasonTabs');
   seasons.forEach(season => { const o=document.createElement('option'); o.value=season; o.textContent=season; seasonSelect.appendChild(o); });
+  if(seasonTabs){const addTab=(label,value)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.season=value;b.className=value==='all'?'active':'';b.onclick=()=>{seasonSelect.value=value;page=1;render();seasonTabs.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));};seasonTabs.appendChild(b);};addTab('All seasons','all');seasons.forEach(s=>addTab(s,s));}
   function filtered() {
     const term = (search?.value || '').trim().toLowerCase();
     const season = seasonSelect?.value || 'all';
@@ -774,7 +776,7 @@ document.addEventListener('click', () => {
       const card=document.createElement('a'); card.className='related-card'+(idx===GROUP_INDEX?' active':''); card.href=href;
       const thumb=document.createElement('div'); thumb.className='thumb';
       if(THUMB_URL) thumb.style.backgroundImage='url("'+String(THUMB_URL).replace(/"/g,'\\"')+'")'; else thumb.style.background='#111';
-      const meta=document.createElement('div'); meta.className='meta-line'; meta.textContent=g.name||('Episode '+(idx+1));
+      const meta=document.createElement('div'); meta.className='meta-line'; meta.textContent=g.name||('Episode '+(idx+1));const quality=document.createElement('small');quality.className='quality-count';quality.textContent=(g.buttons||[]).length+' source'+((g.buttons||[]).length===1?'':'s');meta.appendChild(quality);
       card.appendChild(thumb);card.appendChild(meta);grid.appendChild(card);
     });
     if(count) count.textContent=rows.length+' episode'+(rows.length===1?'':'s');

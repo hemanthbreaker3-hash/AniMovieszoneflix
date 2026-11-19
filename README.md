@@ -78,3 +78,8 @@ This flow does **not** copy or forward the media into `CHANNEL_ID` or any storag
 - `/link https://t.me/channel/123` checks that the bot can access the Telegram message and that it contains supported media, then creates Download and Watch links against that original message. It does not copy the message into the storage channel. For private channel links, the bot must already have access to the channel.
 - `/link` without an argument still accepts a file/media message in the next message.
 - Automatic external-player chooser behavior is controlled by the existing **Automatic player redirect** setting in the admin panel. Web browsers cannot enumerate installed Android apps, so the page lists supported players and uses Android VIEW intents with package targeting and a browser fallback; the device decides whether the requested app is installed and can handle the media.
+
+
+### Docker Compose compatibility
+
+Use Docker Compose V2 (`docker compose`, with a space). Legacy `docker-compose` v1.29.2 may fail recreating containers with `KeyError: ContainerConfig`. For a one-time recovery, remove only the old web container with `docker-compose rm -sf web` and recreate it; do not delete volumes. See `UPGRADE-NOTES.md`.
