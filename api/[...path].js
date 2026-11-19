@@ -2165,7 +2165,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
 
   const relatedSection = watchGroups.length
     ? `<div class="related-groups card" style="margin-top:14px;padding:16px">
-      <h3>Episodes / groups</h3>
+      <h3>Episodes / Seasons</h3>
       <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episodes or S01E01…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Select season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div><div class="season-tabs" id="seasonTabs" aria-label="Season shortcuts"></div>
       <div class="related-grid" id="relatedGrid"></div>
       <div class="related-pager" id="relatedPager" hidden></div>
@@ -2539,12 +2539,32 @@ document.addEventListener('click', () => {
   if (!grid || !WATCH_GROUPS.length) return;
   const PER = 8, search = document.getElementById('episodeSearch'), seasonSelect = document.getElementById('seasonFilter'), count = document.getElementById('episodeCount');
   let page = 1;
-  const seasonOf = name => { const m=String(name||'').match(/(?:season\s*|s)(\d{1,2})/i); return m?'Season '+Number(m[1]):'Other'; };
-  const seasons=[...new Set(WATCH_GROUPS.map(g=>seasonOf(g.name)))].sort((a,b)=>a==='Other'?1:b==='Other'?-1:Number(a.replace(/\D/g,''))-Number(b.replace(/\D/g,'')));
-  const seasonTabs=document.getElementById('seasonTabs');
-  seasons.forEach(season=>{const o=document.createElement('option');o.value=season;o.textContent=season;seasonSelect.appendChild(o);});
-  if(seasonTabs){const addTab=(label,value)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.season=value;b.className=value==='all'?'active':'';b.onclick=()=>{seasonSelect.value=value;page=1;render();seasonTabs.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));};seasonTabs.appendChild(b);};addTab('All seasons','all');seasons.forEach(s=>addTab(s,s));}
-  function filtered(){const term=(search?.value||'').trim().toLowerCase(),season=seasonSelect?.value||'all';return WATCH_GROUPS.map((g,idx)=>({g,idx})).filter(({g})=>(season==='all'||seasonOf(g.name)===season)&&(!term||String(g.name||'').toLowerCase().includes(term)));}
+  // Detect Season 1/2, S01, S1E01, etc. Unlabeled groups default to Season 1 (no more "Other").
+  const seasonOf = name => {
+    const text = String(name || '');
+    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
+    return m ? 'Season ' + Number(m[1]) : 'Season 1';
+  };
+  const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))].sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
+  const seasonTabs = document.getElementById('seasonTabs');
+  seasons.forEach(season => { const o = document.createElement('option'); o.value = season; o.textContent = season; seasonSelect.appendChild(o); });
+  if (seasonTabs) {
+    const addTab = (label, value) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.dataset.season = value;
+      b.className = value === 'all' ? 'active' : '';
+      b.onclick = () => { seasonSelect.value = value; page = 1; render(); seasonTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b)); };
+      seasonTabs.appendChild(b);
+    };
+    addTab('All seasons', 'all');
+    seasons.forEach(s => addTab(s, s));
+  }
+  function filtered() {
+    const term = (search?.value || '').trim().toLowerCase(), season = seasonSelect?.value || 'all';
+    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => (season === 'all' || seasonOf(g.name) === season) && (!term || String(g.name || '').toLowerCase().includes(term)));
+  }
   function render(){const rows=filtered(),max=Math.max(1,Math.ceil(rows.length/PER));page=Math.min(Math.max(1,page),max);grid.innerHTML='';rows.slice((page-1)*PER,page*PER).forEach(({g,idx})=>{const first=(g.buttons||[])[0];if(!first)return;const card=document.createElement('a');card.className='related-card'+(idx===GROUP_INDEX?' active':'');card.href=watchHrefFor(idx,0)||first.url;const thumb=document.createElement('div');thumb.className='thumb';if(POSTER_URL)thumb.style.backgroundImage='url("'+String(POSTER_URL).replace(/"/g,'\\"')+'")';const meta=document.createElement('div');meta.className='meta-line';meta.textContent=g.name||('Episode '+(idx+1));const quality=document.createElement('small');quality.className='quality-count';quality.textContent=(g.buttons||[]).length+' source'+((g.buttons||[]).length===1?'':'s');meta.appendChild(quality);card.append(thumb,meta);grid.append(card);});if(count)count.textContent=rows.length+' episode'+(rows.length===1?'':'s');pager.hidden=max<=1;pager.innerHTML='';if(max<=1)return;const make=(label,target,disabled=false,active=false)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=disabled;if(active)b.classList.add('active');b.onclick=()=>{page=target;render();};pager.appendChild(b);};make('‹',page-1,page<=1);const first=Math.max(1,Math.min(page-2,max-4));for(let n=first;n<=Math.min(max,first+4);n++)make(String(n),n,false,n===page);make('›',page+1,page>=max);}
   search?.addEventListener('input',()=>{page=1;render();});seasonSelect?.addEventListener('change',()=>{page=1;seasonTabs?.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.season===seasonSelect.value));render();});page=Math.floor(GROUP_INDEX/PER)+1;render();
 })();

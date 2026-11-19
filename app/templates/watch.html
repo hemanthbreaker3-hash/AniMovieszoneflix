@@ -444,8 +444,8 @@
 
     {% if _wg and _wg|length > 0 %}
     <div class="related-groups card" style="margin-top:14px;padding:16px">
-      <h3>Episodes / groups</h3>
-      <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episode (S01E01)…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Filter season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div>
+      <h3>Episodes / Seasons</h3>
+      <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episode (S01E01)…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Select season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div>
       <div class="season-tabs" id="seasonTabs" aria-label="Season shortcuts"></div><div class="related-grid" id="relatedGrid"></div>
       <div class="related-pager" id="relatedPager" hidden></div>
     </div>
@@ -747,49 +747,104 @@ document.addEventListener('click', () => {
   const seasonSelect = document.getElementById('seasonFilter');
   const count = document.getElementById('episodeCount');
   let page = 1;
+  // Detect Season 1, Season 2, S01, S1, etc. Unlabeled groups default to Season 1.
   const seasonOf = (name) => {
     const text = String(name || '');
-    const m = text.match(/(?:season\s*|s)(\d{1,2})/i);
-    return m ? 'Season ' + Number(m[1]) : 'Other';
+    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
+    return m ? 'Season ' + Number(m[1]) : 'Season 1';
   };
   const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))];
-  seasons.sort((a,b) => a === 'Other' ? 1 : b === 'Other' ? -1 : Number(a.replace(/\D/g,'')) - Number(b.replace(/\D/g,'')));
-  const seasonTabs=document.getElementById('seasonTabs');
-  seasons.forEach(season => { const o=document.createElement('option'); o.value=season; o.textContent=season; seasonSelect.appendChild(o); });
-  if(seasonTabs){const addTab=(label,value)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.season=value;b.className=value==='all'?'active':'';b.onclick=()=>{seasonSelect.value=value;page=1;render();seasonTabs.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));};seasonTabs.appendChild(b);};addTab('All seasons','all');seasons.forEach(s=>addTab(s,s));}
+  seasons.sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
+  const seasonTabs = document.getElementById('seasonTabs');
+  seasons.forEach(season => {
+    const o = document.createElement('option');
+    o.value = season;
+    o.textContent = season;
+    seasonSelect.appendChild(o);
+  });
+  if (seasonTabs) {
+    const addTab = (label, value) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.dataset.season = value;
+      b.className = value === 'all' ? 'active' : '';
+      b.onclick = () => {
+        seasonSelect.value = value;
+        page = 1;
+        render();
+        seasonTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      };
+      seasonTabs.appendChild(b);
+    };
+    addTab('All seasons', 'all');
+    seasons.forEach(s => addTab(s, s));
+  }
   function filtered() {
     const term = (search?.value || '').trim().toLowerCase();
     const season = seasonSelect?.value || 'all';
-    return WATCH_GROUPS.map((g,idx)=>({g,idx})).filter(({g}) => {
-      const name=String(g.name||'');
-      return (season==='all' || seasonOf(name)===season) && (!term || name.toLowerCase().includes(term));
+    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
+      const name = String(g.name || '');
+      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
     });
   }
   function render() {
-    const rows=filtered();
-    const max=Math.max(1,Math.ceil(rows.length/PER));
-    page=Math.min(Math.max(1,page),max);
-    grid.innerHTML='';
-    rows.slice((page-1)*PER,page*PER).forEach(({g,idx})=>{
-      const first=(g.buttons||[])[0]; if(!first) return;
-      const href=watchHrefFor(idx,0)||first.url;
-      const card=document.createElement('a'); card.className='related-card'+(idx===GROUP_INDEX?' active':''); card.href=href;
-      const thumb=document.createElement('div'); thumb.className='thumb';
-      if(THUMB_URL) thumb.style.backgroundImage='url("'+String(THUMB_URL).replace(/"/g,'\\"')+'")'; else thumb.style.background='#111';
-      const meta=document.createElement('div'); meta.className='meta-line'; meta.textContent=g.name||('Episode '+(idx+1));const quality=document.createElement('small');quality.className='quality-count';quality.textContent=(g.buttons||[]).length+' source'+((g.buttons||[]).length===1?'':'s');meta.appendChild(quality);
-      card.appendChild(thumb);card.appendChild(meta);grid.appendChild(card);
+    const rows = filtered();
+    const max = Math.max(1, Math.ceil(rows.length / PER));
+    page = Math.min(Math.max(1, page), max);
+    grid.innerHTML = '';
+    rows.slice((page - 1) * PER, page * PER).forEach(({ g, idx }) => {
+      const first = (g.buttons || [])[0];
+      if (!first) return;
+      const href = watchHrefFor(idx, 0) || first.url;
+      const card = document.createElement('a');
+      card.className = 'related-card' + (idx === GROUP_INDEX ? ' active' : '');
+      card.href = href;
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      if (THUMB_URL) thumb.style.backgroundImage = 'url("' + String(THUMB_URL).replace(/"/g, '\\"') + '")';
+      else thumb.style.background = '#111';
+      const meta = document.createElement('div');
+      meta.className = 'meta-line';
+      meta.textContent = g.name || ('Episode ' + (idx + 1));
+      const quality = document.createElement('small');
+      quality.className = 'quality-count';
+      quality.textContent = (g.buttons || []).length + ' source' + ((g.buttons || []).length === 1 ? '' : 's');
+      meta.appendChild(quality);
+      card.appendChild(thumb);
+      card.appendChild(meta);
+      grid.appendChild(card);
     });
-    if(count) count.textContent=rows.length+' episode'+(rows.length===1?'':'s');
-    pager.hidden=max<=1; pager.innerHTML=''; if(max<=1)return;
-    const button=(label,target,disabled=false,active=false)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=disabled;if(active)b.classList.add('active');b.onclick=()=>{page=target;render();};pager.appendChild(b);};
-    button('‹',page-1,page<=1);
-    const start=Math.max(1,Math.min(page-2,max-4)); const end=Math.min(max,start+4);
-    for(let n=start;n<=end;n++)button(String(n),n,false,n===page);
-    button('›',page+1,page>=max);
+    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
+    pager.hidden = max <= 1;
+    pager.innerHTML = '';
+    if (max <= 1) return;
+    const button = (label, target, disabled = false, active = false) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.disabled = disabled;
+      if (active) b.classList.add('active');
+      b.onclick = () => { page = target; render(); };
+      pager.appendChild(b);
+    };
+    button('‹', page - 1, page <= 1);
+    const start = Math.max(1, Math.min(page - 2, max - 4));
+    const end = Math.min(max, start + 4);
+    for (let n = start; n <= end; n++) button(String(n), n, false, n === page);
+    button('›', page + 1, page >= max);
   }
-  search?.addEventListener('input',()=>{page=1;render();});
-  seasonSelect?.addEventListener('change',()=>{page=1;render();});
-  page=Math.floor(GROUP_INDEX/PER)+1;
+  search?.addEventListener('input', () => { page = 1; render(); });
+  seasonSelect?.addEventListener('change', () => {
+    page = 1;
+    if (seasonTabs) {
+      seasonTabs.querySelectorAll('button').forEach(b =>
+        b.classList.toggle('active', b.dataset.season === seasonSelect.value)
+      );
+    }
+    render();
+  });
+  page = Math.floor(GROUP_INDEX / PER) + 1;
   render();
 })();
 

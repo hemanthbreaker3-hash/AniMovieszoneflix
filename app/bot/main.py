@@ -2445,7 +2445,7 @@ def register_handlers(bot):
         & ~filters.command([
             "start", "cancel", "fspanel", "panel", "filestore",
             "batch", "ss", "sv", "mi", "stats", "broadcast", "ban", "unban",
-            "autodel", "addgroups", "save", "link", "addbots", "shorteners",
+            "autodel", "del", "addgroups", "save", "link", "addbots", "shorteners",
             "search", "username", "password", "backendurl", "baseurl",
             "categories", "edit", "manage",
         ])
