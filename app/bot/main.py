@@ -25,6 +25,7 @@ from app.database.connection import (
     db,
     get_active_cloudflare_url,
     get_active_website_url,
+    get_watch_page_base_url,
 )
 from app.admin.auth import make_password_hash
 from app.cms import rewrite_all_stored_catalog_buttons
@@ -342,23 +343,26 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
 
     button_rows = []
     try:
-        base = await get_active_cloudflare_url()
-        if not base:
+        # Watch Online → Vercel website (proxies stream to VPS). Download can use same.
+        watch_base = await get_watch_page_base_url()
+        media_base = await get_active_cloudflare_url()
+        if not watch_base:
             try:
-                base = normalize_public_base_url(settings.BASE_URL)
+                watch_base = normalize_public_base_url(settings.BASE_URL or settings.WEBSITE_URL or "")
             except Exception:
-                base = (settings.BASE_URL or "").rstrip("/")
+                watch_base = (settings.BASE_URL or settings.WEBSITE_URL or "").rstrip("/")
+        dl_base = watch_base or media_base
         runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
         downloads_enabled = runtime.get("downloads_enabled", True)
         streaming_enabled = runtime.get("streaming_enabled", True)
         fs_username = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
 
-        if streaming_enabled and base and short_code:
-            watch_url = f"{base.rstrip('/')}/watch/{short_code}"
+        if streaming_enabled and watch_base and short_code:
+            watch_url = f"{watch_base.rstrip('/')}/watch/{short_code}"
             button_rows.append(InlineKeyboardButton("🍿 Watch Online", url=watch_url))
-        if base and short_code:
+        if dl_base and short_code:
             if downloads_enabled:
-                dl_url = f"{base.rstrip('/')}/dl/{short_code}"
+                dl_url = f"{dl_base.rstrip('/')}/dl/{short_code}"
                 button_rows.append(InlineKeyboardButton("⚡ Direct Download", url=dl_url))
             elif fs_username:
                 dl_url = filestore_deep_link(fs_username, short_code)
@@ -1361,13 +1365,15 @@ def register_handlers(bot):
         if log_cf:
             await apply_auto_cloudflare_url(log_cf, source="media-upload-check")
 
+        # Prefer Vercel website for Watch Online; tunnel still used as fallback
         media_base = await get_active_cloudflare_url()
-        if media_base:
-            base_url = media_base
+        watch_base = await get_watch_page_base_url()
+        if watch_base or media_base:
+            base_url = watch_base or media_base
             links_ready = True
         else:
             try:
-                base_url = normalize_public_base_url(settings.BASE_URL)
+                base_url = normalize_public_base_url(settings.BASE_URL or settings.WEBSITE_URL or "")
                 links_ready = True
             except ValueError as exc:
                 logger.warning("Public BASE_URL not configured: %s", exc)
@@ -1654,10 +1660,12 @@ def register_handlers(bot):
             log_cf = _extract_tunnel_url_from_logs()
             if log_cf:
                 await apply_auto_cloudflare_url(log_cf, source="telegram-message-link")
-            base_url = await get_active_cloudflare_url()
+            base_url = await get_watch_page_base_url()
+            if not base_url:
+                base_url = await get_active_cloudflare_url()
             if not base_url:
                 try:
-                    base_url = normalize_public_base_url(settings.BASE_URL)
+                    base_url = normalize_public_base_url(settings.BASE_URL or settings.WEBSITE_URL or "")
                 except ValueError:
                     base_url = None
             if not base_url:
@@ -3276,16 +3284,20 @@ def register_handlers(bot):
                 parse_mode=ParseMode.HTML,
             )
 
+            # Prefer Vercel website for Watch Online links (stream proxied to VPS)
             base_url = (
-                (await get_active_cloudflare_url())
+                (await get_watch_page_base_url())
+                or (await get_active_cloudflare_url())
                 or (await get_active_website_url())
                 or settings.BASE_URL
+                or settings.WEBSITE_URL
             )
             base_url = str(base_url or "").rstrip("/")
             if not base_url:
                 return await status.edit_text(
-                    "❌ No public BASE_URL / Cloudflare URL configured. "
-                    "Set BASE_URL or start the ngrok tunnel first."
+                    "❌ No public website URL configured. "
+                    "Set WEBSITE_URL / BASE_URL to your Vercel site "
+                    "(e.g. https://animovieszoneflix.vercel.app) or start the tunnel."
                 )
 
             runtime_cfg = await db.site_settings.find_one({"_id": "runtime"}) or {}

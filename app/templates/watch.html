@@ -258,6 +258,18 @@
     border-color:#8b5cf6;color:#fff;
   }
   .btn.accent:hover{filter:brightness(1.08);box-shadow:0 0 14px rgba(59,130,246,.4)}
+
+  :root{--blue:#2563eb;--blue-glow:#38bdf8;--line2:rgba(37,99,235,.18);--neon-blue:0 0 16px rgba(37,99,235,.14);--red-glow:#e11d48}
+  .player-shell{background:linear-gradient(135deg,#2563eb,#38bdf8,#e11d48,#16a34a);box-shadow:0 18px 46px rgba(37,99,235,.16)}
+  .player-box{background:#eaf4ff!important;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}
+  .player-box::after{background:linear-gradient(145deg,rgba(255,255,255,.24),transparent 40%,rgba(37,99,235,.04));box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+  .card.info,.nav-row,.player-pop,.switch-pop,.laptop-pop{background:rgba(255,255,255,.76)!important;color:#17365f!important;border:1px solid rgba(37,99,235,.16)!important;backdrop-filter:blur(18px);box-shadow:0 14px 36px rgba(31,78,140,.09)}
+  .filename{color:#17365f!important}.meta span{background:rgba(255,255,255,.75)!important;color:#426080!important;border-color:rgba(37,99,235,.15)!important}
+  .nav-btn,.btn,.select,.player-chrome-btn,.native-switch{background:rgba(255,255,255,.85)!important;color:#17365f!important;border-color:rgba(37,99,235,.2)!important}
+  .tg-btn{background:linear-gradient(135deg,#2563eb,#38bdf8)!important;color:#fff!important}
+  .player-loading{background:rgba(239,246,255,.9)!important;color:#2563eb!important}
+  .spinner{border-color:rgba(37,99,235,.2)!important;border-top-color:#2563eb!important}
+  .player-pop .pop-title{color:#2563eb!important}
 </style>
 
 <!-- Official movi-player (https://github.com/mrujjwalg/movi-player · https://moviplayer.com) -->
@@ -1149,3 +1161,27 @@ if (engine === 'wasm') {
 {% endif %}
 </script>
 {% endblock %}
+
+
+<script>
+(() => {
+  const code = {{ file.short_code|tojson }};
+  const counter = document.querySelector('.meta span:nth-child(2)');
+  const key = 'amz-play-view-' + code;
+  let token = localStorage.getItem(key);
+  if (!token) { token = (crypto.randomUUID ? crypto.randomUUID() : 'v-' + Date.now() + '-' + Math.random().toString(36).slice(2)) + '-visitor'; localStorage.setItem(key, token); }
+  let registered = false;
+  async function registerPlaybackView() {
+    if (registered) return; registered = true;
+    try {
+      const res = await fetch('/api/views/' + encodeURIComponent(code), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({visitor_token:token})});
+      if (!res.ok) return; const data = await res.json();
+      if (counter && Number.isFinite(data.views)) counter.textContent = data.views.toLocaleString() + ' views';
+    } catch (_) {}
+  }
+  const native = document.getElementById('nativePlayer');
+  if (native) native.addEventListener('play', registerPlaybackView, {once:true});
+  const custom = document.getElementById('moviPlayer');
+  if (custom) { custom.addEventListener('play', registerPlaybackView, {once:true}); custom.addEventListener('playing', registerPlaybackView, {once:true}); }
+})();
+</script>

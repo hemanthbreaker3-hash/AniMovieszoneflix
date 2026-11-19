@@ -221,6 +221,27 @@ async def get_active_website_url() -> str | None:
     return settings.BASE_URL.rstrip("/")
 
 
+async def get_watch_page_base_url() -> str | None:
+    """
+    Base URL for user-facing Watch Online / title links.
+
+    Prefer the Vercel website so /watch pages open even when the tunnel is
+    rate-limited; Vercel proxies /stream|/dl|/remux to the VPS backend.
+    Fall back to the media tunnel URL, then BASE_URL.
+    """
+    site = await get_active_vercel_website_url()
+    if site:
+        return site.rstrip("/")
+    site = await get_active_website_url()
+    if site:
+        return site.rstrip("/")
+    media = await get_active_cloudflare_url()
+    if media:
+        return media.rstrip("/")
+    base = (settings.BASE_URL or settings.WEBSITE_URL or "").rstrip("/")
+    return base or None
+
+
 async def load_custom_settings() -> None:
     """Load and synchronize runtime URLs and shared secrets with MongoDB so VPS and Vercel share one source of truth."""
     now = datetime.now(timezone.utc)

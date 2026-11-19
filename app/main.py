@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -329,6 +330,30 @@ async def watch_page(request: Request, short_code: str):
     )
 
 
+@app.post("/api/views/{short_code}")
+async def register_view(short_code: str, request: Request):
+    """Count one playback view per browser token per file; retries are idempotent."""
+    payload = await request.json()
+    token = str(payload.get("visitor_token") or "").strip()
+    if len(token) < 20 or len(token) > 128:
+        raise HTTPException(status_code=400, detail="Invalid visitor token")
+    file_data = await files_col.find_one({"short_code": short_code}, {"_id": 1, "access_count": 1})
+    if not file_data:
+        raise HTTPException(status_code=404, detail="File not found")
+    views_col = db.playback_views
+    try:
+        await views_col.create_index([("short_code", 1), ("visitor_token", 1)], unique=True)
+        await views_col.insert_one({"short_code": short_code, "visitor_token": token, "created_at": datetime.utcnow()})
+        await files_col.update_one({"short_code": short_code}, {"$inc": {"access_count": 1}})
+    except Exception as exc:
+        # Duplicate token means this browser already counted this file. Other DB errors
+        # are logged but do not interrupt playback.
+        if exc.__class__.__name__ not in ("DuplicateKeyError",):
+            logger.warning("View registration failed for %s: %s", short_code, exc)
+    latest = await files_col.find_one({"short_code": short_code}, {"access_count": 1})
+    return {"views": int((latest or {}).get("access_count") or 0)}
+
+
 @app.api_route("/dl/{short_code}", methods=["GET", "HEAD"])
 @app.api_route("/dl/{short_code}/{extra_name:path}", methods=["GET", "HEAD"])
 @app.api_route("/stream/{short_code}", methods=["GET", "HEAD"])
@@ -355,13 +380,8 @@ async def stream_file(request: Request, short_code: str, extra_name: str = ""):
     if not file_data:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Download managers issue many parallel byte-range requests for one file. Count only
-    # the initial full GET, not every Range/HEAD request, to avoid a MongoDB write per chunk.
-    if request.method.upper() == "GET" and not request.headers.get("range"):
-        try:
-            await files_col.update_one({"short_code": short_code}, {"$inc": {"access_count": 1}})
-        except Exception:
-            logger.debug("Could not update access counter for %s", short_code)
+    # Views are counted only when playback starts via /api/views/{short_code}.
+    # Stream, HEAD and byte-range requests are intentionally not counted.
 
     all_clients = session_manager.get_all_clients()
     if not all_clients and session_manager.bot_client is None:

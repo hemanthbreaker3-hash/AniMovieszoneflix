@@ -36,6 +36,12 @@
   .hero-h1{font-size:clamp(1.6rem,4.6vw,2.9rem);line-height:1.08;margin:0 0 12px;background:linear-gradient(100deg,#fff 15%,#c4b5fd 55%,var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
   .hero-detail{display:grid;grid-template-columns:minmax(140px,190px) 1fr;gap:24px;align-items:end}
   @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}.hero-detail{grid-template-columns:1fr}.hero-detail .hero-poster{max-width:150px}}
+
+  .link-box{background:rgba(255,255,255,.72)!important;border:1px solid rgba(37,99,235,.16)!important;backdrop-filter:blur(18px);box-shadow:0 14px 36px rgba(31,78,140,.08)}
+  .link-box.telegram{background:rgba(255,255,255,.78)!important;border-color:rgba(22,163,74,.2)!important}
+  .group-block{background:rgba(255,255,255,.55)!important;border-color:rgba(37,99,235,.14)!important}
+  .link-box h2{color:#2563eb!important}.link-box.watch h2{color:#2563eb!important}.link-box.download h2{color:#16a34a!important}.link-box.telegram h2{color:#16a34a!important}
+  .pg-btn,.pg-jump button{background:linear-gradient(135deg,#2563eb,#38bdf8)!important;color:#fff!important;border:0!important}
 </style>
 {% endblock %}
 {% block content %}
@@ -66,6 +72,7 @@
         <div class="meta">
           <span>{{ page.release_date or 'Release date unavailable' }}</span>
           <span>★ {{ page.rating or 'N/A' }}</span>
+          <span>▶ {{ (page.view_count or 0)|int }} verified views</span>
           {% if page.genres %}{% for genre in page.genres %}<span>{{ genre }}</span>{% endfor %}{% endif %}
         </div>
         <p class="muted" style="margin:10px 0 0;line-height:1.55;max-width:70ch">{{ page.overview }}</p>

@@ -19,6 +19,7 @@ from app.utils.helpers import (
     is_trycloudflare_url,
     normalize_public_base_url,
     rewrite_page_groups_to_cloudflare,
+    extract_watch_short_code,
 )
 
 router = APIRouter()
@@ -371,6 +372,19 @@ async def title_page(request: Request, slug: str):
         raise HTTPException(404, 'Title not found')
     cf_base = await get_active_cloudflare_url() or settings.BASE_URL.rstrip('/')
     page = serialize_catalog_doc(raw_page, cf_base)
+    # Aggregate persisted view counts from this title's Watch links only.
+    watch_codes = set()
+    for group in (page.get('groups') or []):
+        if str((group or {}).get('box') or 'watch').strip().lower() not in ('watch', ''):
+            continue
+        for button in (group or {}).get('buttons') or []:
+            code = extract_watch_short_code((button or {}).get('url'))
+            if code:
+                watch_codes.add(code)
+    page['view_count'] = 0
+    if watch_codes:
+        rows = await db.files.find({'short_code': {'$in': list(watch_codes)}}, {'access_count': 1}).to_list(None)
+        page['view_count'] = sum(int(row.get('access_count') or 0) for row in rows)
     settings_doc = await get_settings()
     fs_user = (settings_doc.get('filestore_bot_username') or '').strip().lstrip('@')
     telegram_groups = build_telegram_groups_from_watch(page.get('groups') or [], fs_user) if fs_user else []

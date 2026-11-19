@@ -569,7 +569,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#07080c">
+  <meta name="theme-color" content="#0a0a0c">
   <meta name="description" content="AniMoviesZoneflix — discover anime, movies and series.">
   <meta name="color-scheme" content="dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -691,7 +691,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
     /* AniMoviesZoneflix anime-cinema theme */
     body{background:radial-gradient(ellipse 75% 38% at 5% -8%,rgba(139,92,246,.16),transparent 62%),radial-gradient(ellipse 65% 42% at 100% 5%,rgba(111,48,151,.13),transparent 60%),linear-gradient(180deg,#09090d,#0b0a10 52%,#09090d)}
     .topbar{border-bottom-color:rgba(139,92,246,.18)}
-    .topbar-logo img{display:none}
+    .topbar-logo img{display:block;object-fit:contain;background:#0a0a0c}
     .brand-word{font-family:var(--font-display);font-weight:900;letter-spacing:-.055em;background:linear-gradient(100deg,#fff 8%,#c4b5fd 43%,#8b5cf6 83%,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
     .brand-mark span{background:linear-gradient(180deg,#22d3ee,#7c3aed);-webkit-background-clip:text;background-clip:text}
     .brand-mark::before{border-left-color:#8b5cf6;border-right-color:rgba(255,155,66,.75)}
@@ -714,7 +714,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
 <header class="topbar">
   <div class="topbar-inner">
     <a class="topbar-logo" href="/" title="AniMoviesZoneflix Home">
-      <img src="/static/images/logo.jpg" alt="AniMoviesZoneflix logo" width="42" height="42" loading="eager">
+      <img src="/static/images/logo.jpg" alt="AniMoviesZoneflix" width="42" height="42" loading="eager" onerror="this.style.display='none'">
       <span class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"><span>AZF</span></span>
         <span class="brand-word">AniMoviesZoneflix</span>
