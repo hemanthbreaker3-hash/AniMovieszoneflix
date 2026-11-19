@@ -2146,7 +2146,20 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     .related-pager button:disabled{opacity:.4;cursor:not-allowed}
     .related-pager span{color:#9ca3af;font-size:13px}
     .related-pager button.active{background:linear-gradient(125deg,#7c3aed,#22d3ee);border-color:transparent;color:#071018;font-weight:900}
-    .episode-tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.episode-tools input,.episode-tools select{min-height:40px;border:1px solid #2a2a3a;border-radius:10px;background:#0d0d16;color:#fff;padding:8px 12px;outline:none} .season-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px}.season-tabs button{border:1px solid rgba(148,163,184,.18);background:#111722;color:#9ca3af;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer}.season-tabs button.active{background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.4);color:#c4b5fd}.episode-tools input{flex:1;min-width:160px}.episode-tools input:focus,.episode-tools select:focus{border-color:#22d3ee;box-shadow:0 0 0 3px rgba(139,92,246,.12)}.episode-count{font-size:12px;color:#9ca3af;align-self:center}
+    .episode-tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.episode-tools input,.episode-tools select{min-height:40px;border:1px solid #2a2a3a;border-radius:10px;background:#0d0d16;color:#fff;padding:8px 12px;outline:none} .season-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px}.season-tabs button{border:1px solid rgba(148,163,184,.18);background:#111722;color:#9ca3af;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer}.season-tabs button.active{background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.4);color:#c4b5fd}
+    .side-eps{max-height:min(70vh,560px);display:flex;flex-direction:column;gap:10px}
+    .side-season-bar{display:flex;flex-wrap:wrap;gap:6px}
+    .side-season-bar button{border:1px solid rgba(148,163,184,.2);background:#111722;color:#9ca3af;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:800;cursor:pointer}
+    .side-season-bar button.active{background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.45);color:#c4b5fd}
+    .side-ep-tools{display:flex;flex-direction:column;gap:8px}
+    .side-ep-tools select,.side-ep-tools input{min-height:38px;border:1px solid #2a2a3a;border-radius:10px;background:#0d0d16;color:#fff;padding:8px 10px;outline:none;width:100%}
+    .side-ep-list{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:min(48vh,380px);padding-right:2px}
+    .side-ep-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:10px;border:1px solid rgba(148,163,184,.16);background:#101621;color:#e5e7eb;text-decoration:none;font-size:12px;font-weight:700}
+    .side-ep-btn:hover{border-color:rgba(139,92,246,.4);background:#151c2a}
+    .side-ep-btn.active{border-color:rgba(34,211,238,.5);background:rgba(34,211,238,.08);color:#fff}
+    .side-ep-btn .ep-tag{flex:0 0 auto;background:rgba(139,92,246,.18);color:#c4b5fd;border-radius:7px;padding:3px 7px;font-size:10px;font-weight:900;letter-spacing:.04em}
+    .side-ep-btn .ep-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .side-ep-count{font-size:11px;color:#9ca3af}.episode-tools input{flex:1;min-width:160px}.episode-tools input:focus,.episode-tools select:focus{border-color:#22d3ee;box-shadow:0 0 0 3px rgba(139,92,246,.12)}.episode-count{font-size:12px;color:#9ca3af;align-self:center}
     .notice{padding:11px 13px;border-radius:11px;background:rgba(59,130,246,.06);border:1px solid rgba(139,92,246,.18);color:var(--muted);font-size:12px;margin-top:12px}
     .player-shell{background:linear-gradient(135deg,#7c3aed,#22d3ee);box-shadow:0 22px 54px rgba(0,0,0,.5),0 0 28px rgba(124,58,237,.12)}
     .player-chrome-btn{background:rgba(9,12,20,.82);border-color:rgba(148,163,184,.22)}.player-chrome-btn:hover{background:rgba(124,58,237,.24);border-color:rgba(34,211,238,.45)}
@@ -2163,14 +2176,8 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     @media(min-width:900px){.watch-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.side{align-self:start;position:sticky;top:72px}}
   </style>`;
 
-  const relatedSection = watchGroups.length
-    ? `<div class="related-groups card" style="margin-top:14px;padding:16px">
-      <h3>Episodes / Seasons</h3>
-      <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episodes or S01E01…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Select season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div><div class="season-tabs" id="seasonTabs" aria-label="Season shortcuts"></div>
-      <div class="related-grid" id="relatedGrid"></div>
-      <div class="related-pager" id="relatedPager" hidden></div>
-    </div>`
-    : '';
+  // Episodes / Seasons UI lives in the right side panel (sideEpList + season filter)
+  const relatedSection = '';
 
   const tgBtn = fsUser
     ? `<a class="tg-btn" id="tgFileBtn" href="https://t.me/${escapeHtml(fsUser)}?start=file_${escapeHtml(file.short_code)}" target="_blank" rel="noopener">✈ Telegram</a>`
@@ -2234,10 +2241,19 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
       </div>
       <div id="copy-status" class="copy-ok"></div>
     </div>
-    ${relatedSection}
   </section>
   <aside class="side">
-    <div class="card">
+    <div class="card side-eps" id="sideEpsCard">
+      <b>Episodes / Seasons</b>
+      <div class="side-season-bar" id="sideSeasonBar" aria-label="Seasons"></div>
+      <div class="side-ep-tools">
+        <select id="seasonFilter" aria-label="Select season"><option value="all">All seasons</option></select>
+        <input id="episodeSearch" type="search" placeholder="Search EP…" aria-label="Search episodes">
+      </div>
+      <div class="side-ep-list" id="sideEpList"></div>
+      <div class="side-ep-count" id="episodeCount"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
       <b>Open in player</b>
       <div id="mobile" class="player-panel active"><div class="player-grid" id="mobile-grid"></div></div>
       <div class="notice">MX Player, PLAYit, VLC, and Download. If a player does not open, use <b>Copy Download Link</b> or <b>Copy Stream URL</b>.</div>
@@ -2295,7 +2311,26 @@ function showToast(msg) {
 }
 
 function warmMedia(url) {
-  try { fetch(url, { headers: { Range: 'bytes=0-65535' }, priority: 'low' }).then(r => r.arrayBuffer()).catch(() => {}); } catch (_) {}
+  try {
+    fetch(url, { headers: { Range: 'bytes=0-65535' }, priority: 'low' })
+      .then(async (r) => {
+        const ctype = (r.headers.get('content-type') || '').toLowerCase();
+        if (!r.ok || ctype.includes('application/json') || ctype.includes('text/html')) {
+          let msg = 'Stream unavailable from VPS tunnel';
+          try {
+            const j = await r.clone().json();
+            if (j && j.message) msg = j.message;
+          } catch (_) {}
+          hideLoading();
+          showToast(msg);
+          const st = document.getElementById('copy-status');
+          if (st) st.textContent = msg + ' Use Download / external player, or fix ngrok bandwidth on the VPS.';
+          return;
+        }
+        return r.arrayBuffer();
+      })
+      .catch(() => {});
+  } catch (_) {}
 }
 
 function initNative(reason) {
@@ -2535,38 +2570,79 @@ document.addEventListener('click', () => {
 })();
 
 (function setupRelated() {
-  const grid = document.getElementById('relatedGrid'), pager = document.getElementById('relatedPager');
-  if (!grid || !WATCH_GROUPS.length) return;
-  const PER = 8, search = document.getElementById('episodeSearch'), seasonSelect = document.getElementById('seasonFilter'), count = document.getElementById('episodeCount');
-  let page = 1;
-  // Detect Season 1/2, S01, S1E01, etc. Unlabeled groups default to Season 1 (no more "Other").
+  const list = document.getElementById('sideEpList');
+  const seasonSelect = document.getElementById('seasonFilter');
+  const search = document.getElementById('episodeSearch');
+  const count = document.getElementById('episodeCount');
+  const seasonBar = document.getElementById('sideSeasonBar');
+  if (!list || !WATCH_GROUPS.length) {
+    const card = document.getElementById('sideEpsCard');
+    if (card) card.style.display = 'none';
+    return;
+  }
   const seasonOf = name => {
     const text = String(name || '');
     const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
     return m ? 'Season ' + Number(m[1]) : 'Season 1';
   };
   const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))].sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
-  const seasonTabs = document.getElementById('seasonTabs');
-  seasons.forEach(season => { const o = document.createElement('option'); o.value = season; o.textContent = season; seasonSelect.appendChild(o); });
-  if (seasonTabs) {
-    const addTab = (label, value) => {
+  seasons.forEach(season => {
+    if (!seasonSelect) return;
+    const o = document.createElement('option');
+    o.value = season; o.textContent = season; seasonSelect.appendChild(o);
+  });
+  function setActiveSeasonUI(value) {
+    if (seasonBar) {
+      seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
+    }
+    if (seasonSelect) seasonSelect.value = value;
+  }
+  if (seasonBar) {
+    const add = (label, value) => {
       const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = label;
-      b.dataset.season = value;
+      b.type = 'button'; b.textContent = label; b.dataset.season = value;
       b.className = value === 'all' ? 'active' : '';
-      b.onclick = () => { seasonSelect.value = value; page = 1; render(); seasonTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b)); };
-      seasonTabs.appendChild(b);
+      b.onclick = () => { setActiveSeasonUI(value); render(); };
+      seasonBar.appendChild(b);
     };
-    addTab('All seasons', 'all');
-    seasons.forEach(s => addTab(s, s));
+    add('All', 'all');
+    seasons.forEach(s => add(s.replace(/^Season\s+/i, 'S'), s));
   }
   function filtered() {
-    const term = (search?.value || '').trim().toLowerCase(), season = seasonSelect?.value || 'all';
-    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => (season === 'all' || seasonOf(g.name) === season) && (!term || String(g.name || '').toLowerCase().includes(term)));
+    const term = (search && search.value || '').trim().toLowerCase();
+    const season = (seasonSelect && seasonSelect.value) || 'all';
+    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
+      const name = String(g.name || '');
+      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
+    });
   }
-  function render(){const rows=filtered(),max=Math.max(1,Math.ceil(rows.length/PER));page=Math.min(Math.max(1,page),max);grid.innerHTML='';rows.slice((page-1)*PER,page*PER).forEach(({g,idx})=>{const first=(g.buttons||[])[0];if(!first)return;const card=document.createElement('a');card.className='related-card'+(idx===GROUP_INDEX?' active':'');card.href=watchHrefFor(idx,0)||first.url;const thumb=document.createElement('div');thumb.className='thumb';if(POSTER_URL)thumb.style.backgroundImage='url("'+String(POSTER_URL).replace(/"/g,'\\"')+'")';const meta=document.createElement('div');meta.className='meta-line';meta.textContent=g.name||('Episode '+(idx+1));const quality=document.createElement('small');quality.className='quality-count';quality.textContent=(g.buttons||[]).length+' source'+((g.buttons||[]).length===1?'':'s');meta.appendChild(quality);card.append(thumb,meta);grid.append(card);});if(count)count.textContent=rows.length+' episode'+(rows.length===1?'':'s');pager.hidden=max<=1;pager.innerHTML='';if(max<=1)return;const make=(label,target,disabled=false,active=false)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=disabled;if(active)b.classList.add('active');b.onclick=()=>{page=target;render();};pager.appendChild(b);};make('‹',page-1,page<=1);const first=Math.max(1,Math.min(page-2,max-4));for(let n=first;n<=Math.min(max,first+4);n++)make(String(n),n,false,n===page);make('›',page+1,page>=max);}
-  search?.addEventListener('input',()=>{page=1;render();});seasonSelect?.addEventListener('change',()=>{page=1;seasonTabs?.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.season===seasonSelect.value));render();});page=Math.floor(GROUP_INDEX/PER)+1;render();
+  function render() {
+    const rows = filtered();
+    list.innerHTML = '';
+    rows.forEach(({ g, idx }) => {
+      const first = (g.buttons || [])[0];
+      if (!first) return;
+      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
+      const a = document.createElement('a');
+      a.className = 'side-ep-btn' + (idx === GROUP_INDEX ? ' active' : '');
+      a.href = href;
+      const tag = document.createElement('span');
+      tag.className = 'ep-tag';
+      tag.textContent = 'EP ' + (idx + 1);
+      const name = document.createElement('span');
+      name.className = 'ep-name';
+      name.textContent = g.name || ('Episode ' + (idx + 1));
+      a.append(tag, name);
+      list.appendChild(a);
+    });
+    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
+  }
+  search && search.addEventListener('input', render);
+  seasonSelect && seasonSelect.addEventListener('change', () => {
+    setActiveSeasonUI(seasonSelect.value);
+    render();
+  });
+  render();
 })();
 
 async function copyStream() {
@@ -3520,6 +3596,24 @@ export default async function handler(req, res) {
 
       const clientReq = transport.request(targetUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers }, (backendRes) => {
         const responseHeaders = { ...backendRes.headers };
+        const status = backendRes.statusCode || 502;
+        const ctype = String(responseHeaders['content-type'] || responseHeaders['Content-Type'] || '').toLowerCase();
+        const ngrokErr = responseHeaders['ngrok-error-code'] || responseHeaders['Ngrok-Error-Code'] || '';
+        // Never pipe ngrok interstitial / error HTML into the video player
+        if (ngrokErr || status === 403 || status === 429 || (ctype.includes('text/html') && status >= 400)) {
+          backendRes.resume();
+          const msg = ngrokErr === 'ERR_NGROK_725'
+            ? 'VPS tunnel bandwidth limit reached (ngrok). Upgrade ngrok plan or wait for monthly reset, then streams will work again.'
+            : (ngrokErr
+              ? ('Media tunnel error: ' + ngrokErr + '. Check VPS ngrok is online and not rate-limited.')
+              : 'Media backend returned an error page instead of video. Check VPS/ngrok tunnel.');
+          sendJson(res, status === 403 || status === 429 ? status : 502, {
+            error: 'Media backend unavailable',
+            message: msg,
+            ngrok_error: ngrokErr || null,
+          });
+          return;
+        }
         // Normalize CORS for browser / movi-player
         responseHeaders['access-control-allow-origin'] = '*';
         responseHeaders['access-control-expose-headers'] = 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type';
@@ -3529,7 +3623,7 @@ export default async function handler(req, res) {
         delete responseHeaders['transfer-encoding'];
         // Avoid redirect loops if backend somehow redirects
         delete responseHeaders['location'];
-        res.writeHead(backendRes.statusCode || 502, responseHeaders);
+        res.writeHead(status, responseHeaders);
         if (req.method === 'HEAD') {
           res.end();
           backendRes.resume();

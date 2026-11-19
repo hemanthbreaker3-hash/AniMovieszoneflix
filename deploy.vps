@@ -98,7 +98,7 @@ aliases = {'APP_ID':'API_ID', 'DATABASE_URI':'MONGODB_URI', 'DATABASE_URL':'MONG
 for alias, canonical in aliases.items():
     if os.environ.get(alias) and not os.environ.get(canonical):
         os.environ[canonical] = os.environ[alias]
-keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','BRANDING','LOGO_URL','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN')
+keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','BRANDING','LOGO_URL','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN','TUNNEL_PROVIDER','CLOUDFLARE_URL','NGROK_URL')
 for key in keys:
     if key in os.environ: values[key] = os.environ[key]
 # Also accept legacy alias values from .env/config.env.
@@ -169,16 +169,34 @@ for _ in $(seq 1 90); do
     info "Admin dashboard: /panel (username: admin; password stored in .env as ADMIN_PANEL_TOKEN)."
     "${COMPOSE[@]}" ps
 
-    # The app creates and maintains the ngrok HTTPS tunnel internally.
-    # The NGROK_AUTHTOKEN is read from .env; no Cloudflare daemon is installed.
+    # Public tunnel is started inside the web container based on TUNNEL_PROVIDER.
+    #   export TUNNEL_PROVIDER=cloudflare  → Cloudflare quick tunnel (*.trycloudflare.com), synced to MongoDB
+    #   export TUNNEL_PROVIDER=ngrok        → pyngrok (needs NGROK_AUTHTOKEN)
     run_root systemctl disable --now file2link-cloudflared.service animovieszoneflix-ngrok.service >/dev/null 2>&1 || true
-    if grep -Eq '^NGROK_AUTHTOKEN=[^[:space:]]+' .env; then
-      info "NGROK_AUTHTOKEN found. The application will create its HTTPS ngrok URL on startup."
-      info "Follow tunnel startup and URL synchronization with: docker compose logs -f web"
+    PROVIDER="$(python3 - <<'PY2'
+import json, pathlib
+v={}
+for line in pathlib.Path('.env').read_text().splitlines():
+    if not line or line.lstrip().startswith('#') or '=' not in line: continue
+    k, raw = line.split('=',1); raw=raw.strip()
+    try: val=json.loads(raw) if raw.startswith('"') else raw
+    except Exception: val=raw.strip('"')
+    v[k.strip()]=str(val)
+print((v.get('TUNNEL_PROVIDER') or 'cloudflare').strip().lower())
+PY2
+)"
+    info "TUNNEL_PROVIDER=${PROVIDER}"
+    if [ "$PROVIDER" = "ngrok" ]; then
+      if grep -Eq '^NGROK_AUTHTOKEN=.+' .env && ! grep -Eq '^NGROK_AUTHTOKEN=("|\"")?\s*$' .env; then
+        info "ngrok selected. App will create an HTTPS ngrok URL on startup and sync it to MongoDB."
+      else
+        warn "TUNNEL_PROVIDER=ngrok but NGROK_AUTHTOKEN is empty. Add token or switch: export TUNNEL_PROVIDER=cloudflare"
+      fi
     else
-      warn "NGROK_AUTHTOKEN is empty in .env. Add your token from https://dashboard.ngrok.com/get-started/your-authtoken and restart the web service."
-      warn "The website will still run locally; public Telegram links need the ngrok URL."
+      info "Cloudflare quick tunnel selected. App will generate https://*.trycloudflare.com and sync backend/stream URLs."
+      info "No Cloudflare account token is required for quick tunnels."
     fi
+    info "Follow tunnel startup and URL synchronization with: docker compose logs -f web"
     info "Deployment command completed."
     exit 0
   fi

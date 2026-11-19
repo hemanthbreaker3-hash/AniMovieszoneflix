@@ -36,6 +36,21 @@ When you run `/baseurl` or `/backendurl` with a `https://*.ngrok-free.app` URL (
    - `DATABASE_NAME` — optional (auto-detects `tg_media_bot` / `animovieszoneflix` automatically if omitted).
 3. Deploy. Open `/`, `/api/health`, `/api/catalog`, `/search`, and `/panel` on your Vercel domain.
 
+## Public tunnel (Cloudflare or ngrok)
+
+Choose the VPS public tunnel with a shell export (or `.env`):
+
+```bash
+# Recommended: Cloudflare quick tunnel (*.trycloudflare.com) — no account token, no free-bandwidth cap
+export TUNNEL_PROVIDER=cloudflare
+
+# Or use ngrok (requires token)
+export TUNNEL_PROVIDER=ngrok
+export NGROK_AUTHTOKEN=YOUR_NGROK_AUTH_TOKEN
+```
+
+On startup the app generates the public HTTPS URL, writes it to MongoDB (`backend_url` / `ngrok_url` / `cloudflare_url`), rewrites catalog watch/download button domains, and keeps the tunnel alive. Watch logs: `docker compose logs -f web`.
+
 ## 3. Deploy the Bot & Streamer on the VPS
 
 Configure `.env` (or run `./deploy.vps`) and start with Docker Compose:
