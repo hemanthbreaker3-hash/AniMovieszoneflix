@@ -3,13 +3,23 @@
 {% block nav_home %}active{% endblock %}
 {% block content %}
 <style>#catalog-pagination[hidden]{display:none!important}#catalog-pagination button{background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:700}#catalog-pagination button:disabled{opacity:.4;cursor:not-allowed}#catalog-pagination button.active{background:linear-gradient(125deg,var(--accent),var(--accent-2));color:#180b02;border-color:transparent}</style>
-<section class="backdrop-hero" id="homeHero" style="min-height:clamp(240px,48vw,480px)">
+<style>
+.home-cinema{position:relative;margin:22px 0 28px;min-height:clamp(300px,42vw,500px);border:1px solid rgba(255,255,255,.09);border-radius:24px;overflow:hidden;background:#101116;box-shadow:0 28px 80px rgba(0,0,0,.48)}
+.home-cinema .backdrop-img{filter:saturate(.86);transform:scale(1.015)}
+.home-cinema .backdrop-scrim{background:linear-gradient(90deg,rgba(4,5,8,.94) 0%,rgba(4,5,8,.68) 48%,rgba(4,5,8,.08) 100%),linear-gradient(0deg,rgba(4,5,8,.68),transparent 52%)}
+.home-cinema .backdrop-content{padding:clamp(22px,5vw,54px);max-width:760px}
+.home-cinema #homeHeroTitle{font-size:clamp(2rem,5.2vw,4rem)!important;letter-spacing:-.045em!important;background:linear-gradient(100deg,#fff 10%,#e6d9ff 65%,#e4bd82)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent!important}
+.home-cinema .hero-eyebrow{letter-spacing:.24em!important;color:#e4bd82!important}
+#trending-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(142px,1fr));gap:16px}
+@media(max-width:600px){.home-cinema{min-height:330px;border-radius:18px}.home-cinema .backdrop-scrim{background:linear-gradient(0deg,rgba(4,5,8,.94),rgba(4,5,8,.2) 100%)}#trending-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}}
+</style>
+<section class="backdrop-hero home-cinema" id="homeHero" style="min-height:clamp(300px,42vw,500px)">
   <div class="backdrop-img" id="homeHeroImg"></div>
   <div class="backdrop-scrim"></div>
-  <div class="backdrop-content" style="display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-height:clamp(240px,48vw,480px)">
+  <div class="backdrop-content" style="display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-height:clamp(300px,42vw,500px)">
     <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-display)">{{ BRANDING }}</div>
     <h1 id="homeHeroTitle" style="font-size:clamp(1.6rem,5vw,3rem);margin:0 0 10px;line-height:1.08;background:linear-gradient(100deg,#fff 15%,#c4b5fd 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent">Discover anime & movies</h1>
-    <p id="homeHeroOverview" class="muted" style="max-width:60ch;margin-bottom:16px">Explore anime, movies and series. Pick a title to watch or get it in Telegram.</p>
+    <p id="homeHeroOverview" class="muted" style="max-width:60ch;margin-bottom:16px">Explore the worlds you love. Discover your next movie, anime or series.</p>
     <div id="homeHeroActions" style="display:flex;gap:10px;flex-wrap:wrap"></div>
   </div>
 </section>
@@ -67,7 +77,7 @@
     const bg = backdropUrl(pick.backdrop_path) || posterUrl(pick.poster_path);
     if (heroImg && bg) heroImg.style.backgroundImage = 'url("' + bg.replace(/"/g, '\\"') + '")';
     if (heroTitle) heroTitle.textContent = pick.title || 'Discover anime & movies';
-    if (heroOverview) heroOverview.textContent = pick.overview || 'Explore anime, movies and series. Pick a title to watch or get it in Telegram.';
+    if (heroOverview) heroOverview.textContent = pick.overview || 'Explore the worlds you love. Discover your next movie, anime or series.';
     if (heroActions) {
       heroActions.innerHTML = '';
       const meta = document.createElement('div');
