@@ -148,6 +148,8 @@ app.add_middleware(
 APP_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+templates.env.globals["BRANDING"] = settings.BRANDING
+templates.env.globals["LOGO_URL"] = settings.LOGO_URL
 
 
 @app.post("/verify-key")

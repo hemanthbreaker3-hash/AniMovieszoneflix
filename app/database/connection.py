@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     SESSIONS: str = ""
     ADMIN_PANEL_TOKEN: str = ""
     TMDB_API_KEY: str = ""
+    BRANDING: str = "AniMoviesZoneflix"
+    LOGO_URL: str = ""
     STREAM_CHUNK_SIZE: int = 4194304
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=True)

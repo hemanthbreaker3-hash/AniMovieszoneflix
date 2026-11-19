@@ -11,7 +11,7 @@ read -r -p 'Telegram OWNER_ID: ' OWNER_ID
 read -r -p 'ADMINS (comma-separated IDs, optional): ' ADMINS
 read -r -p 'CHANNEL_ID (optional): ' CHANNEL_ID
 read -r -p 'FORCE_SUB_CHANNELS (comma-separated IDs, optional): ' FORCE_SUB_CHANNELS
-read -r -s -p 'TMDB_API_KEY (optional, for search & posters): ' TMDB_API_KEY; echo
+read -r -s -p 'TMDB_API_KEY (optional, for search & posters): ' TMDB_API_KEY; echo\nread -r -p 'Custom branding name (default AniMoviesZoneflix): ' BRANDING\nBRANDING="${BRANDING:-AniMoviesZoneflix}"\nread -r -p 'Custom logo URL (optional): ' LOGO_URL
 read -r -s -p 'OMDB_API_KEY (optional, extra metadata): ' OMDB_API_KEY; echo
 read -r -s -p 'BOT_TOKEN (paste rotated/current token): ' BOT_TOKEN; echo
 read -r -s -p 'MONGODB_URI (paste rotated/current Atlas URI): ' MONGODB_URI; echo
@@ -23,7 +23,7 @@ rm -rf -- "$APP_DIR"
 git clone "$REPO_URL" "$APP_DIR"
 cd "$APP_DIR"
 
-export API_ID API_HASH BOT_TOKEN OWNER_ID ADMINS CHANNEL_ID FORCE_SUB_CHANNELS TMDB_API_KEY OMDB_API_KEY
+export API_ID API_HASH BOT_TOKEN OWNER_ID ADMINS CHANNEL_ID FORCE_SUB_CHANNELS TMDB_API_KEY OMDB_API_KEY BRANDING LOGO_URL
 export MONGODB_URI
 export DATABASE_NAME="${DATABASE_NAME:-tg_media_bot}"
 export REDIS_URL='redis://redis:6379/0'

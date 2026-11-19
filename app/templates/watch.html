@@ -185,7 +185,7 @@
     transition:border-color .2s,box-shadow .2s;
   }
   .select:focus{border-color:var(--blue);box-shadow:var(--neon-blue)}
-  .player-panel{display:none}.player-panel.active{display:block}
+  .player-panel{display:none}.player-panel.active{display:block}\n  .player-brand-float{position:absolute;z-index:12;top:12px;left:12px;max-width:65%;padding:6px 11px;border-radius:9px;background:rgba(3,10,24,.55);border:1px solid rgba(96,165,250,.32);color:#60a5fa;font-weight:900;font-size:clamp(11px,2.5vw,16px);letter-spacing:.04em;text-shadow:0 0 14px rgba(59,130,246,.65);pointer-events:none;opacity:.9;transition:top .5s,left .5s,opacity .5s;backdrop-filter:blur(8px)}
   .player-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
   .pbtn{
     min-height:46px;border:1px solid var(--line);border-radius:12px;
@@ -344,10 +344,10 @@
   <div class="backdrop-scrim"></div>
   <div class="backdrop-content">
     {% if title_page %}
-    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px;font-family:var(--font-display)">AniMoviesZoneflix · Now Playing</div>
+    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px;font-family:var(--font-display)">{{ BRANDING }} · Now Playing</div>
     <h1 style="font-size:clamp(1.2rem,3.4vw,1.9rem);margin:0;line-height:1.15">{{ title_page.title }}</h1>
     {% else %}
-    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-family:var(--font-display)">AniMoviesZoneflix · Now Playing</div>
+    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-family:var(--font-display)">{{ BRANDING }} · Now Playing</div>
     {% endif %}
   </div>
 </section>
@@ -358,7 +358,7 @@
     <div class="player-shell">
       <div class="neon-ribbon" aria-hidden="true"></div>
       <div class="player-box">
-        <div class="player-wrapper" id="playerWrapper">
+        <div class="player-wrapper" id="playerWrapper">\n          <div class="player-brand-float" id="playerBrandFloat">{{ BRANDING }}</div>
           <movi-player id="moviPlayer"
             playsinline controls preload="auto" resume
             theme="dark" themecolor="#8b5cf6"
@@ -595,11 +595,11 @@ function buildPlayerGrids() {
   const el = document.getElementById('mobile-grid');
   if (el) el.innerHTML = '';
   addPlayer('mobile-grid', 'MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME));
-  addPlayer('mobile-grid', 'PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME));
+  addPlayer('mobile-grid', 'PLAYit', androidIntent(REMUX_URL + '?audio=0&aac=1', 'com.playit.videoplayer', 'video/mp4'));
   addPlayer('mobile-grid', 'VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME));
   addPlayer('mobile-grid', 'Download', DL_URL);
 }
-buildPlayerGrids();
+buildPlayerGrids();\n(function movePlayerBrand(){\n const badge=document.getElementById('playerBrandFloat'), wrapper=document.getElementById('playerWrapper');\n if(!badge||!wrapper)return;\n const move=()=>{const w=wrapper.clientWidth,h=wrapper.clientHeight; if(w<90||h<60)return; const maxX=Math.max(8,w-badge.offsetWidth-8),maxY=Math.max(8,h-badge.offsetHeight-8); badge.style.left=(8+Math.random()*Math.max(0,maxX-8))+'px'; badge.style.top=(8+Math.random()*Math.max(0,maxY-8))+'px';};\n move();setInterval(move,4200);window.addEventListener('resize',move);\n})();
 
 /* ===== Group / title context for switch, prev/next, related ===== */
 const WATCH_GROUPS = {{ (_wg if _wg is defined else [])|tojson }};
@@ -671,7 +671,7 @@ function goToGroupButton(groupIdx, buttonIdx) {
   if (!btn || !pop || !list) return;
   const items = [
     ['MX Player', androidIntent(STREAM_URL, 'com.mxtech.videoplayer.ad', INTENT_MIME)],
-    ['PLAYit', androidIntent(STREAM_URL, 'com.playit.videoplayer', INTENT_MIME)],
+    ['PLAYit', androidIntent(REMUX_URL + '?audio=0&aac=1', 'com.playit.videoplayer', 'video/mp4')],
     ['VLC', androidIntent(STREAM_URL, 'org.videolan.vlc', INTENT_MIME)],
   ];
   list.innerHTML = '';

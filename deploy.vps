@@ -98,7 +98,7 @@ aliases = {'APP_ID':'API_ID', 'DATABASE_URI':'MONGODB_URI', 'DATABASE_URL':'MONG
 for alias, canonical in aliases.items():
     if os.environ.get(alias) and not os.environ.get(canonical):
         os.environ[canonical] = os.environ[alias]
-keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN')
+keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','BRANDING','LOGO_URL','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN')
 for key in keys:
     if key in os.environ: values[key] = os.environ[key]
 # Also accept legacy alias values from .env/config.env.
