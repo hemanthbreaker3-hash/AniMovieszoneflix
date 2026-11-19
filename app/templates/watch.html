@@ -156,7 +156,8 @@
   .side-eps{max-height:min(70vh,560px);display:flex;flex-direction:column;gap:10px}
   .side-season-bar{display:flex;flex-wrap:wrap;gap:6px}
   .side-season-bar button{border:1px solid rgba(148,163,184,.2);background:#111722;color:#9ca3af;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:800;cursor:pointer}
-  .side-season-bar button.active{background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.45);color:#c4b5fd}
+  .side-season-head{display:flex;align-items:center;justify-content:space-between;padding:8px 4px 4px;margin-top:6px;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#e2b77e;border-bottom:1px solid rgba(255,255,255,.08)}.side-season-head:first-child{margin-top:0}.side-season-head small{color:var(--muted);font-weight:600;letter-spacing:.04em}
+.side-season-bar button.active{background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.45);color:#c4b5fd}
   .side-ep-tools{display:flex;flex-direction:column;gap:8px}
   .side-ep-tools select,.side-ep-tools input{min-height:38px;border:1px solid var(--line2,#2a2a3a);border-radius:10px;background:#0d0d16;color:#fff;padding:8px 10px;outline:none;width:100%}
   .side-ep-list{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:min(48vh,380px);padding-right:2px}
@@ -791,20 +792,42 @@ document.addEventListener('click', () => {
     if (card) card.style.display = 'none';
     return;
   }
-  function parseEpisode(name) {
-    const text = String(name || '').trim();
-    let m = text.match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
-      || text.match(/\bSeason\s*0*(\d{1,3})\s*[-_. ]*(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
+  const parseSeason = (value) => {
+    const text = String(value || '').trim();
+    let m = text.match(/\bSeason[\s._-]*0*(\d{1,3})\b/i)
+      || text.match(/(?:^|[\s\[(\-_])S0*(\d{1,3})(?=[\s\])\-_]|E\d|\b)/i)
+      || text.match(/\b0*(\d{1,3})(?:st|nd|rd|th)\s+Season\b/i);
+    return m ? Number(m[1]) : null;
+  };
+  const parseEpisode = (value, fallbackSeason, fallbackIdx = null) => {
+    const text = String(value || '').trim();
+    let m = text.match(/\bS(?:eason[\s._-]*)?0*(\d{1,3})[\s\-_.]*E(?:pisode[\s._-]*)?0*(\d{1,4})\b/i)
+      || text.match(/\bSeason[\s._-]*0*(\d{1,3})[\s\-_.]*(?:Episode|Ep)[\s._-]*0*(\d{1,4})\b/i)
       || text.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
     if (m) return { season: Number(m[1]), episode: Number(m[2]) };
-    m = text.match(/\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i);
-    if (m) return { season: 1, episode: Number(m[1]) };
+    m = text.match(/\b(?:Episode|Ep|E)[\s._-]*0*(\d{1,4})\b/i);
+    if (m) return { season: fallbackSeason || 1, episode: Number(m[1]) };
+    m = text.match(/^#?0*(\d{1,4})(?:\b|[\s\-_.])/);
+    if (m && fallbackSeason) return { season: fallbackSeason, episode: Number(m[1]) };
+    if (fallbackSeason && fallbackIdx !== null) return { season: fallbackSeason, episode: fallbackIdx + 1 };
     return null;
-  }
-  const rows = WATCH_GROUPS.map((g, idx) => ({ g, idx, parsed: parseEpisode(g.name) }))
-    .filter(row => row.parsed && Number.isFinite(row.parsed.season) && Number.isFinite(row.parsed.episode));
-  rows.sort((a,b) => a.parsed.season-b.parsed.season || a.parsed.episode-b.parsed.episode || a.idx-b.idx);
-  const seasons = [...new Set(rows.map(row => row.parsed.season))].sort((a,b)=>a-b);
+  };
+  const rows = [];
+  const fileSeason = parseSeason(typeof FILE_NAME === 'string' ? FILE_NAME : '');
+  WATCH_GROUPS.forEach((g, groupIdx) => {
+    const buttons = Array.isArray(g.buttons) ? g.buttons : [];
+    const groupSeason = parseSeason(g.name);
+    buttons.forEach((button, buttonIdx) => {
+      if (!button || !button.url) return;
+      const btnSeason = parseSeason(button.name);
+      const effectiveSeason = btnSeason || groupSeason || fileSeason || null;
+      const parsed = parseEpisode(button.name, effectiveSeason, groupSeason ? buttonIdx : null)
+        || parseEpisode(g.name, effectiveSeason, null);
+      if (parsed) rows.push({ g, button, groupIdx, buttonIdx, parsed, label: String(button.name || g.name || ('Episode ' + parsed.episode)) });
+    });
+  });
+  rows.sort((a, b) => a.parsed.season - b.parsed.season || a.parsed.episode - b.parsed.episode || a.groupIdx - b.groupIdx || a.buttonIdx - b.buttonIdx);
+  const seasons = [...new Set(rows.map(row => row.parsed.season))].sort((a, b) => a - b);
   if (!rows.length || !seasons.length) {
     const card = document.getElementById('sideEpsCard');
     if (card) card.style.display = 'none';
@@ -812,42 +835,63 @@ document.addEventListener('click', () => {
   }
   if (seasonSelect) {
     seasonSelect.innerHTML = '';
-    seasons.forEach(season => {
-      const o=document.createElement('option'); o.value=String(season); o.textContent='Season '+season; seasonSelect.appendChild(o);
-    });
-    seasonSelect.value=String(seasons[0]);
+    const all = document.createElement('option'); all.value = 'all'; all.textContent = 'All Seasons'; seasonSelect.appendChild(all);
+    seasons.forEach(season => { const o = document.createElement('option'); o.value = String(season); o.textContent = 'Season ' + season; seasonSelect.appendChild(o); });
+    seasonSelect.value = 'all';
   }
-  let selected=String(seasons[0]);
+  let selected = 'all';
   function setActiveSeasonUI(value) {
-    selected=value;
-    if (seasonBar) seasonBar.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.season===value));
-    if (seasonSelect) seasonSelect.value=value;
+    selected = value;
+    if (seasonBar) seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
+    if (seasonSelect) seasonSelect.value = value;
   }
   if (seasonBar) {
-    seasonBar.innerHTML='';
-    seasons.forEach(season=>{
-      const b=document.createElement('button'); b.type='button'; b.textContent='S'+String(season).padStart(2,'0'); b.dataset.season=String(season);
-      b.className=String(season)===selected?'active':'';
-      b.onclick=()=>{setActiveSeasonUI(String(season));render();}; seasonBar.appendChild(b);
-    });
+    seasonBar.innerHTML = '';
+    const add = (label, value) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.dataset.season = value;
+      b.className = value === selected ? 'active' : '';
+      b.onclick = () => { setActiveSeasonUI(value); render(); };
+      seasonBar.appendChild(b);
+    };
+    add('All Seasons', 'all');
+    seasons.forEach(season => add('Season ' + season, String(season)));
   }
   function render() {
-    const term=(search?.value||'').trim().toLowerCase();
-    const season=selected;
-    const filtered=rows.filter(row=>String(row.parsed.season)===season && (!term || String(row.g.name||'').toLowerCase().includes(term)));
-    list.innerHTML='';
-    filtered.forEach(({g,idx,parsed})=>{
-      const first=(g.buttons||[])[0]; if(!first)return;
-      const href=(typeof watchHrefFor==='function'?watchHrefFor(idx,0):null)||first.url;
-      const a=document.createElement('a'); a.className='side-ep-btn'+(idx===GROUP_INDEX?' active':''); a.href=href;
-      const tag=document.createElement('span');tag.className='ep-tag';tag.textContent='EP '+String(parsed.episode).padStart(2,'0');
-      const name=document.createElement('span');name.className='ep-name';name.textContent=g.name||('Episode '+parsed.episode);
-      a.append(tag,name);list.appendChild(a);
+    const term = (search?.value || '').trim().toLowerCase();
+    const filtered = rows.filter(row => (selected === 'all' || String(row.parsed.season) === selected)
+      && (!term || row.label.toLowerCase().includes(term) || ('season ' + row.parsed.season).includes(term)));
+    list.innerHTML = '';
+    const groupBySeason = selected === 'all' && seasons.length > 1;
+    let lastSeason = null;
+    const seasonCounts = {};
+    filtered.forEach(r => { seasonCounts[r.parsed.season] = (seasonCounts[r.parsed.season] || 0) + 1; });
+    filtered.forEach(row => {
+      if (groupBySeason && row.parsed.season !== lastSeason) {
+        lastSeason = row.parsed.season;
+        const head = document.createElement('div');
+        head.className = 'side-season-head';
+        const c = seasonCounts[lastSeason] || 0;
+        head.innerHTML = '<span>Season ' + lastSeason + '</span><small>' + c + ' ep' + (c === 1 ? '' : 's') + '</small>';
+        list.appendChild(head);
+      }
+      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(row.groupIdx, row.buttonIdx) : null) || row.button.url;
+      const a = document.createElement('a');
+      a.className = 'side-ep-btn' + (row.groupIdx === GROUP_INDEX && row.buttonIdx === BUTTON_INDEX ? ' active' : '');
+      a.href = href;
+      const tag = document.createElement('span'); tag.className = 'ep-tag';
+      tag.textContent = 'S' + String(row.parsed.season).padStart(2, '0') + ' · EP ' + String(row.parsed.episode).padStart(2, '0');
+      const name = document.createElement('span'); name.className = 'ep-name'; name.textContent = row.label;
+      a.append(tag, name); list.appendChild(a);
     });
-    if(count)count.textContent=filtered.length+' episode'+(filtered.length===1?'':'s');
+    if (count) {
+      const seasonNote = seasons.length > 1 ? (' across ' + seasons.length + ' seasons') : '';
+      count.textContent = filtered.length + ' episode' + (filtered.length === 1 ? '' : 's') + seasonNote;
+    }
+    const activeEl = list.querySelector('.side-ep-btn.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
   }
-  search?.addEventListener('input',render);
-  seasonSelect?.addEventListener('change',()=>{setActiveSeasonUI(seasonSelect.value);render();});
+  search?.addEventListener('input', render);
+  seasonSelect?.addEventListener('change', () => { setActiveSeasonUI(seasonSelect.value); render(); });
   render();
 })();
 
@@ -901,7 +945,7 @@ async function loadTracks() {
       if (idx !== currentAudioIndex) switchAudio(idx);
     };
     const statusEl = document.getElementById('track-status');
-    if (statusEl) statusEl.textContent = 'Select audio track (basic player / remux)';
+    if (statusEl) statusEl.textContent = 'Select audio track';
   } catch (e) {
     console.debug('Track discovery unavailable', e);
   }

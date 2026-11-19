@@ -2,41 +2,92 @@
 {% block title %}{{ BRANDING }} · Movies & Series{% endblock %}
 {% block nav_home %}active{% endblock %}
 {% block content %}
-<style>#catalog-pagination[hidden]{display:none!important}#catalog-pagination button{background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:700}#catalog-pagination button:disabled{opacity:.4;cursor:not-allowed}#catalog-pagination button.active{background:linear-gradient(125deg,var(--accent),var(--accent-2));color:#180b02;border-color:transparent}</style>
 <style>
-.home-cinema{position:relative;margin:22px 0 28px;min-height:clamp(300px,42vw,500px);border:1px solid rgba(255,255,255,.09);border-radius:24px;overflow:hidden;background:#101116;box-shadow:0 28px 80px rgba(0,0,0,.48)}
-.home-cinema .backdrop-img{filter:saturate(.86);transform:scale(1.015)}
-.home-cinema .backdrop-scrim{background:linear-gradient(90deg,rgba(4,5,8,.94) 0%,rgba(4,5,8,.68) 48%,rgba(4,5,8,.08) 100%),linear-gradient(0deg,rgba(4,5,8,.68),transparent 52%)}
-.home-cinema .backdrop-content{padding:clamp(22px,5vw,54px);max-width:760px}
-.home-cinema #homeHeroTitle{font-size:clamp(2rem,5.2vw,4rem)!important;letter-spacing:-.045em!important;background:linear-gradient(100deg,#fff 10%,#e6d9ff 65%,#e4bd82)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent!important}
-.home-cinema .hero-eyebrow{letter-spacing:.24em!important;color:#e4bd82!important}
-#trending-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(142px,1fr));gap:16px}
-@media(max-width:600px){.home-cinema{min-height:330px;border-radius:18px}.home-cinema .backdrop-scrim{background:linear-gradient(0deg,rgba(4,5,8,.94),rgba(4,5,8,.2) 100%)}#trending-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}}
+  .hero-showcase{display:grid;grid-template-columns:minmax(0,1.72fr) minmax(280px,1fr);gap:22px;margin:10px 0 24px;align-items:stretch}
+  .hero-feature{position:relative;min-height:360px;border-radius:22px;overflow:hidden;background:#141317;border:1px solid var(--line);display:flex;flex-direction:column;justify-content:space-between;padding:22px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .hero-feature-bg{position:absolute;inset:0;background-size:cover;background-position:center;transition:opacity .35s ease,transform .6s ease;filter:brightness(.82)}
+  .hero-feature:hover .hero-feature-bg{transform:scale(1.02)}
+  .hero-feature-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,10,12,.15) 0%,rgba(11,10,12,.45) 50%,rgba(11,10,12,.92) 100%),linear-gradient(90deg,rgba(11,10,12,.75) 0%,transparent 65%)}
+  .hero-dots{position:relative;z-index:2;display:flex;align-items:center;gap:7px}
+  .hero-dot{width:7px;height:7px;border-radius:999px;background:rgba(255,255,255,.32);border:0;cursor:pointer;transition:width .22s,background .22s;padding:0}
+  .hero-dot.active{width:20px;background:#fff}
+  .hero-bottom{position:relative;z-index:2;display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-top:auto}
+  .hero-info{max-width:520px}
+  .hero-year{font-size:12px;font-weight:600;color:rgba(255,255,255,.72);margin-bottom:4px}
+  .hero-title{font-size:clamp(1.65rem,3.4vw,2.65rem);font-weight:800;line-height:1.08;letter-spacing:-.025em;color:#fff;margin-bottom:10px}
+  .hero-stats{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;color:rgba(255,255,255,.78);font-weight:600}
+  .hero-stats span{display:inline-flex;align-items:center;gap:5px}
+  .hero-play-btn{flex-shrink:0;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.16);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.32);color:#fff;font-size:18px;transition:transform .2s,background .2s}
+  .hero-play-btn:hover{transform:scale(1.07);background:var(--accent);color:#0b0a0c;border-color:transparent}
+
+  .now-watching{display:flex;flex-direction:column;gap:12px}
+  .now-watching h3{font-size:15px;font-weight:700;color:var(--text);margin-bottom:2px}
+  .nw-card{display:flex;align-items:center;gap:13px;padding:8px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid var(--line);transition:background .18s,border-color .18s,transform .18s}
+  .nw-card:hover{background:rgba(255,255,255,.06);border-color:rgba(226,183,126,.35);transform:translateX(3px)}
+  .nw-thumb{position:relative;width:104px;height:66px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#17161b}
+  .nw-thumb img{width:100%;height:100%;object-fit:cover}
+  .nw-thumb::after{content:"\f04b";font-family:"Font Awesome 6 Free";font-weight:900;position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.35);color:#fff;font-size:12px}
+  .nw-meta{min-width:0;flex:1}
+  .nw-title{font-size:13.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+  .nw-pills{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+  .nw-pill{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.07);color:#cfccd4}
+  .nw-sub{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:10px;font-weight:600}
+
+  .genre-bar{display:flex;align-items:center;gap:14px;margin:6px 0 24px;flex-wrap:wrap}
+  .genre-label{font-size:12.5px;font-weight:700;color:var(--muted);line-height:1.25;min-width:64px}
+  .genre-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1}
+  .row-arrows{display:flex;align-items:center;gap:8px}
+  .arrow-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:11px}
+  .arrow-btn:hover{background:rgba(226,183,126,.16);border-color:rgba(226,183,126,.5)}
+  .trending-row{display:flex;gap:16px;overflow-x:auto;padding:4px 0 10px;scroll-behavior:smooth;scrollbar-width:none}
+  .trending-row::-webkit-scrollbar{display:none}
+  .trending-row .poster-card{flex:0 0 162px}
+  #catalog-pagination[hidden]{display:none!important}
+  #catalog-pagination button{background:var(--bg-card);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:8px 14px;cursor:pointer;font-weight:600}
+  #catalog-pagination button.active{background:var(--text);color:#0b0a0c;border-color:transparent}
+  #catalog-pagination button:disabled{opacity:.4;cursor:not-allowed}
+  @media(max-width:960px){.hero-showcase{grid-template-columns:1fr}.hero-feature{min-height:300px}}
+  @media(max-width:600px){.hero-feature{min-height:250px;padding:18px}.trending-row .poster-card{flex:0 0 132px}}
 </style>
-<section class="backdrop-hero home-cinema" id="homeHero" style="min-height:clamp(300px,42vw,500px)">
-  <div class="backdrop-img" id="homeHeroImg"></div>
-  <div class="backdrop-scrim"></div>
-  <div class="backdrop-content" style="display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-height:clamp(300px,42vw,500px)">
-    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-display)">{{ BRANDING }}</div>
-    <h1 id="homeHeroTitle" style="font-size:clamp(1.6rem,5vw,3rem);margin:0 0 10px;line-height:1.08;background:linear-gradient(100deg,#fff 15%,#c4b5fd 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent">Discover anime & movies</h1>
-    <p id="homeHeroOverview" class="muted" style="max-width:60ch;margin-bottom:16px">Explore the worlds you love. Discover your next movie, anime or series.</p>
-    <div id="homeHeroActions" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+
+<section class="hero-showcase" id="heroShowcase">
+  <div class="hero-feature" id="heroFeature">
+    <div class="hero-feature-bg" id="homeHeroImg"></div>
+    <div class="hero-feature-scrim"></div>
+    <div class="hero-dots" id="heroDots"></div>
+    <div class="hero-bottom">
+      <div class="hero-info">
+        <div class="hero-year" id="heroYear"></div>
+        <h1 class="hero-title" id="homeHeroTitle">Discover anime &amp; movies</h1>
+        <div class="hero-stats" id="heroStats"></div>
+      </div>
+      <a class="hero-play-btn" id="heroPlayBtn" href="#catalog" aria-label="Play featured"><i class="fa-solid fa-play"></i></a>
+    </div>
+  </div>
+  <div class="now-watching">
+    <h3>Now watching</h3>
+    <div id="nowWatchingList" style="display:flex;flex-direction:column;gap:10px"></div>
   </div>
 </section>
 
-<form class="search-bar" action="/search" method="get" role="search">
-  <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-  <input name="q" placeholder="Search anime, movies, series…" autocomplete="off" maxlength="100" aria-label="Search catalog">
-  <button type="submit">Search</button>
-</form>
+<div class="genre-bar">
+  <div class="genre-label">Find by<br>genre</div>
+  <div class="genre-chips" id="category-nav"></div>
+</div>
 
+<div class="section-head" id="trendingHead" style="display:none">
+  <h2>Trending</h2>
+  <div class="row-arrows">
+    <button type="button" class="arrow-btn" id="trendPrev" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>
+    <button type="button" class="arrow-btn" id="trendNext" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>
+  </div>
+</div>
 <div id="trending-row" class="trending-row" style="display:none" aria-label="Trending"></div>
 
 <div class="section-head" id="catalog">
-  <h2>Explore</h2>
+  <h2>New &amp; Catalog</h2>
   <span class="chip" id="result-count">Loading…</span>
 </div>
-<div class="cat-nav" id="category-nav"></div>
 <div class="poster-grid" id="catalog-grid">
   <p class="muted" style="grid-column:1/-1;padding:48px 0;text-align:center">Loading titles…</p>
 </div>
@@ -48,6 +99,7 @@
   const nav = document.getElementById('category-nav');
   const countEl = document.getElementById('result-count');
   const trend = document.getElementById('trending-row');
+  const trendHead = document.getElementById('trendingHead');
   let catalogPage = 1;
   const CATALOG_PER_PAGE = 24;
   let catalogItems = [];
@@ -55,204 +107,188 @@
   let category = params.get('category') || '';
   let q = params.get('q') || '';
 
-  function posterUrl(p) {
+  function posterUrl(p, size = 'w780') {
     if (!p) return '/static/images/poster.jpg';
-    if (String(p).startsWith('http')) return p;
-    return 'https://image.tmdb.org/t/p/w780' + p;
+    return String(p).startsWith('http') ? p : ('https://image.tmdb.org/t/p/' + size + p);
   }
-
   function backdropUrl(p) {
     if (!p) return '';
-    if (String(p).startsWith('http')) return p;
-    return 'https://image.tmdb.org/t/p/original' + p;
+    return String(p).startsWith('http') ? p : ('https://image.tmdb.org/t/p/original' + p);
   }
+  const iconFor = (slug) => {
+    const s = String(slug || '').toLowerCase();
+    if (!s) return 'fa-border-all';
+    if (s.includes('movie')) return 'fa-film';
+    if (s.includes('series') || s.includes('tv')) return 'fa-tv';
+    if (s.includes('anime')) return 'fa-dragon';
+    if (s.includes('action')) return 'fa-bolt';
+    if (s.includes('comedy')) return 'fa-face-laugh';
+    if (s.includes('drama')) return 'fa-masks-theater';
+    if (s.includes('sci')) return 'fa-rocket';
+    if (s.includes('fantasy')) return 'fa-wand-magic-sparkles';
+    return 'fa-tag';
+  };
 
+  let heroIdx = 0, heroTimer = null;
   function applyHero(list) {
-    const pick = list.find(x => x.backdrop_path) || list[0];
-    if (!pick) return;
-    const heroImg = document.getElementById('homeHeroImg');
-    const heroTitle = document.getElementById('homeHeroTitle');
-    const heroOverview = document.getElementById('homeHeroOverview');
-    const heroActions = document.getElementById('homeHeroActions');
-    const bg = backdropUrl(pick.backdrop_path) || posterUrl(pick.poster_path);
-    if (heroImg && bg) heroImg.style.backgroundImage = 'url("' + bg.replace(/"/g, '\\"') + '")';
-    if (heroTitle) heroTitle.textContent = pick.title || 'Discover anime & movies';
-    if (heroOverview) heroOverview.textContent = pick.overview || 'Explore the worlds you love. Discover your next movie, anime or series.';
-    if (heroActions) {
-      heroActions.innerHTML = '';
-      const meta = document.createElement('div');
-      meta.className = 'hero-meta';
-      const year = (pick.release_date || pick.first_air_date || '').toString().slice(0, 4);
-      if (year) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = year; meta.appendChild(pill); }
-      if (pick.rating != null && Number(pick.rating) > 0) {
-        const pill = document.createElement('span'); pill.className = 'pill gold';
-        pill.textContent = '★ ' + Number(pick.rating).toFixed(1); meta.appendChild(pill);
+    if (!list.length) return;
+    const featured = list.slice(0, 5);
+    const dotsEl = document.getElementById('heroDots');
+    const bgEl = document.getElementById('homeHeroImg');
+    const yearEl = document.getElementById('heroYear');
+    const titleEl = document.getElementById('homeHeroTitle');
+    const statsEl = document.getElementById('heroStats');
+    const playEl = document.getElementById('heroPlayBtn');
+
+    const showSlide = (idx) => {
+      heroIdx = idx % featured.length;
+      const item = featured[heroIdx];
+      const bg = backdropUrl(item.backdrop_path) || posterUrl(item.poster_path, 'original');
+      if (bgEl && bg) bgEl.style.backgroundImage = 'url("' + bg.replace(/"/g, '\\"') + '")';
+      if (yearEl) yearEl.textContent = (item.release_date || item.first_air_date || '').toString().slice(0, 4) || ((item.media_type || 'Movie').toUpperCase());
+      if (titleEl) titleEl.textContent = item.title || 'Featured';
+      if (playEl) playEl.href = '/title/' + encodeURIComponent(item.slug);
+      if (statsEl) {
+        const rating = item.rating != null && Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : '8.0';
+        const kind = (item.media_type === 'tv' || item.media_type === 'series') ? 'Series' : 'Movie';
+        const genres = Array.isArray(item.genres) && item.genres.length ? item.genres.slice(0, 2).join(' · ') : kind;
+        statsEl.innerHTML = '<span><i class="fa-solid fa-star" style="color:#e2b77e"></i> ' + rating + ' IMDb</span><span><i class="fa-solid fa-film"></i> ' + genres + '</span>';
       }
-      if (pick.media_type) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = String(pick.media_type).toUpperCase(); meta.appendChild(pill); }
-      if ((pick.genres || []).length) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = pick.genres.slice(0, 2).join(' · '); meta.appendChild(pill); }
-      heroActions.appendChild(meta);
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap';
-      const watchBtn = document.createElement('a');
-      watchBtn.className = 'btn btn-yellow';
-      watchBtn.href = '/title/' + encodeURIComponent(pick.slug);
-      watchBtn.textContent = '▶ Play';
-      const infoBtn = document.createElement('a');
-      infoBtn.className = 'btn';
-      infoBtn.href = '/title/' + encodeURIComponent(pick.slug);
-      infoBtn.textContent = 'More info';
-      row.appendChild(watchBtn); row.appendChild(infoBtn);
-      heroActions.appendChild(row);
+      if (dotsEl) {
+        dotsEl.innerHTML = '';
+        featured.forEach((_, i) => {
+          const d = document.createElement('button'); d.type = 'button';
+          d.className = 'hero-dot' + (i === heroIdx ? ' active' : '');
+          d.onclick = () => showSlide(i);
+          dotsEl.appendChild(d);
+        });
+      }
+    };
+    showSlide(0);
+    if (heroTimer) clearInterval(heroTimer);
+    if (featured.length > 1) heroTimer = setInterval(() => showSlide(heroIdx + 1), 6500);
+
+    const nw = document.getElementById('nowWatchingList');
+    if (nw) {
+      nw.innerHTML = '';
+      list.slice(0, 3).forEach(item => {
+        const a = document.createElement('a'); a.className = 'nw-card'; a.href = '/title/' + encodeURIComponent(item.slug);
+        const thumb = document.createElement('div'); thumb.className = 'nw-thumb';
+        const img = document.createElement('img'); img.loading = 'lazy';
+        img.src = backdropUrl(item.backdrop_path) || posterUrl(item.poster_path, 'w300'); img.alt = item.title || '';
+        thumb.appendChild(img);
+        const meta = document.createElement('div'); meta.className = 'nw-meta';
+        const t = document.createElement('div'); t.className = 'nw-title'; t.textContent = item.title || 'Untitled';
+        const pills = document.createElement('div'); pills.className = 'nw-pills';
+        const yr = (item.release_date || item.first_air_date || '').toString().slice(0, 4);
+        if (yr) { const s = document.createElement('span'); s.className = 'nw-pill'; s.textContent = yr; pills.appendChild(s); }
+        const tp = document.createElement('span'); tp.className = 'nw-pill'; tp.textContent = (item.media_type === 'tv' ? 'Series' : 'Movie'); pills.appendChild(tp);
+        const sub = document.createElement('div'); sub.className = 'nw-sub';
+        const rating = item.rating != null && Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : '8.0';
+        sub.innerHTML = '<span><i class="fa-solid fa-star" style="color:#e2b77e"></i> ' + rating + ' IMDb</span>';
+        meta.append(t, pills, sub); a.append(thumb, meta); nw.appendChild(a);
+      });
     }
   }
 
   function card(p) {
-    const a = document.createElement('a');
-    a.className = 'poster-card';
-    a.href = '/title/' + encodeURIComponent(p.slug);
-    const img = document.createElement('img');
-    img.src = posterUrl(p.poster_path);
-    img.alt = (p.title || 'Poster') + ' poster';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    const badges = document.createElement('div');
-    badges.className = 'badge-row';
-    const rating = p.rating != null && p.rating !== '' ? Number(p.rating) : null;
-    if (rating != null && !Number.isNaN(rating) && rating > 0) {
-      const b = document.createElement('span');
-      b.className = 'badge badge-rating';
-      b.textContent = '★ ' + (rating % 1 ? rating.toFixed(1) : rating);
-      badges.appendChild(b);
-    }
-    const year = (p.release_date || p.first_air_date || '').toString().slice(0, 4);
-    if (year) {
-      const y = document.createElement('span');
-      y.className = 'badge badge-year';
-      y.textContent = year;
-      badges.appendChild(y);
-    }
-    const play = document.createElement('div');
-    play.className = 'play-hint';
-    play.innerHTML = '<span>▶</span>';
-    const info = document.createElement('div');
-    info.className = 'info';
-    const title = document.createElement('div');
-    title.className = 'title';
-    title.textContent = p.title || 'Untitled';
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const parts = [];
-    if (p.media_type) parts.push(String(p.media_type).toUpperCase());
-    if (Array.isArray(p.genres) && p.genres.length) parts.push(p.genres.slice(0, 2).join(', '));
-    meta.textContent = parts.join(' · ');
-    info.appendChild(title);
-    info.appendChild(meta);
-    a.appendChild(img);
-    a.appendChild(badges);
-    a.appendChild(play);
-    a.appendChild(info);
+    const a = document.createElement('a'); a.className = 'poster-card'; a.href = '/title/' + encodeURIComponent(p.slug);
+    const thumb = document.createElement('div'); thumb.className = 'poster-thumb';
+    const img = document.createElement('img'); img.src = posterUrl(p.poster_path, 'w780'); img.alt = (p.title || 'Poster'); img.loading = 'lazy'; img.decoding = 'async';
+    const play = document.createElement('div'); play.className = 'play-hint'; play.innerHTML = '<span><i class="fa-solid fa-play"></i></span>';
+    thumb.append(img, play);
+    const info = document.createElement('div'); info.className = 'info';
+    const metaTop = document.createElement('div'); metaTop.className = 'meta-top';
+    const rating = p.rating != null && Number(p.rating) > 0 ? Number(p.rating).toFixed(1) : null;
+    if (rating) { const rSpan = document.createElement('span'); rSpan.className = 'imdb'; rSpan.innerHTML = '<i class="fa-solid fa-star"></i> ' + rating + ' IMDb'; metaTop.appendChild(rSpan); }
+    const yr = (p.release_date || p.first_air_date || '').toString().slice(0, 4);
+    if (yr) { const ySpan = document.createElement('span'); ySpan.textContent = yr; metaTop.appendChild(ySpan); }
+    const title = document.createElement('div'); title.className = 'title'; title.textContent = p.title || 'Untitled';
+    info.append(metaTop, title);
+    a.append(thumb, info);
     return a;
   }
 
-  function renderCatalogPage() {
-    const pages = Math.max(1, Math.ceil(catalogItems.length / CATALOG_PER_PAGE));
-    catalogPage = Math.min(Math.max(1, catalogPage), pages);
-    grid.innerHTML = '';
-    catalogItems.slice((catalogPage - 1) * CATALOG_PER_PAGE, catalogPage * CATALOG_PER_PAGE).forEach(p => grid.appendChild(card(p)));
-    const pager = document.getElementById('catalog-pagination');
-    if (!pager) return;
-    pager.hidden = pages <= 1;
-    pager.innerHTML = '';
-    if (pages <= 1) return;
-    const make = (label, page, disabled = false, active = false) => {
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
-      b.disabled = disabled; if (active) b.classList.add('active');
-      b.setAttribute('aria-label', label === '‹' ? 'Previous page' : label === '›' ? 'Next page' : 'Page ' + label);
-      b.onclick = () => { catalogPage = page; renderCatalogPage(); document.getElementById('catalog')?.scrollIntoView({behavior:'smooth',block:'start'}); };
-      pager.appendChild(b);
-    };
-    make('‹', catalogPage - 1, catalogPage <= 1);
-    const start = Math.max(1, Math.min(catalogPage - 2, pages - 4));
-    const end = Math.min(pages, start + 4);
-    for (let n = start; n <= end; n++) make(String(n), n, false, n === catalogPage);
-    make('›', catalogPage + 1, catalogPage >= pages);
-  }
-
-  function chip(label, value, active) {
+  function makeChip(label, slug) {
     const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'chip' + (active ? ' active' : '');
-    b.textContent = label;
+    b.className = 'chip' + (category === slug ? ' active' : '');
+    b.innerHTML = '<i class="fa-solid ' + iconFor(slug) + '"></i><span></span>';
+    b.querySelector('span').textContent = label;
     b.onclick = () => {
-      category = value;
-      const url = new URL(location.href);
-      if (category) url.searchParams.set('category', category); else url.searchParams.delete('category');
-      if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
-      history.replaceState(null, '', url);
-      load();
+      category = slug;
+      const u = new URL(location.href);
+      if (slug) u.searchParams.set('category', slug); else u.searchParams.delete('category');
+      history.replaceState(null, '', u);
       nav.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
       b.classList.add('active');
+      load();
     };
     return b;
   }
 
-  async function load() {
-    try {
-      const qs = new URLSearchParams();
-      if (category) qs.set('category', category);
-      if (q) qs.set('q', q);
-      const r = await fetch('/api/catalog?' + qs.toString(), { cache: 'no-store' });
-      if (!r.ok) throw new Error('Catalog API returned HTTP ' + r.status);
-      const data = await r.json();
-      const list = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
-      let cats = Array.isArray(data.categories) ? data.categories : [];
-      if (!cats.length) { try { const cr = await fetch('/api/categories', {cache:'no-store'}); if (cr.ok) { const cd = await cr.json(); cats = Array.isArray(cd.items) ? cd.items : []; } } catch (_) {} }
-
-      countEl.textContent = list.length ? list.length + ' titles' : '0 titles';
-      nav.innerHTML = '';
-      nav.appendChild(chip('All', '', !category));
-      cats.forEach(c => nav.appendChild(chip(c.name || c.slug, c.slug, category === c.slug)));
-
-      grid.innerHTML = '';
-      if (!list.length) {
-        trend.style.display = 'none';
-        grid.innerHTML = '<p class="muted" style="grid-column:1/-1;padding:48px 0;text-align:center">No titles found. Publish movies or series from the bot or the panel.</p>';
-        return;
-      }
-      catalogItems = list;
-      catalogPage = 1;
-      renderCatalogPage();
-      applyHero(list);
-
-      const top = list.slice(0, 12);
-      if (top.length) {
-        trend.style.display = 'flex';
-        trend.innerHTML = '';
-        top.forEach(p => {
-          const a = document.createElement('a');
-          a.className = 'trending-item';
-          a.href = '/title/' + encodeURIComponent(p.slug);
-          a.title = p.title || '';
-          const img = document.createElement('img');
-          img.src = posterUrl(p.poster_path);
-          img.alt = p.title || 'Poster';
-          img.loading = 'lazy';
-          a.appendChild(img);
-          trend.appendChild(a);
-        });
-      } else {
-        trend.style.display = 'none';
-      }
-    } catch (err) {
-      const safeMessage = String(err && err.message ? err.message : err).replace(/[<>&]/g, '');
-      grid.innerHTML = '<div style="grid-column:1/-1;padding:40px 16px;text-align:center;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius)"><strong style="display:block;font-size:17px;margin-bottom:8px">Catalog temporarily unavailable</strong><p class="muted" style="margin-bottom:14px">' + safeMessage + '</p><button class="btn btn-yellow" type="button" id="catalog-retry">Try again</button></div>';
-      const btn = document.getElementById('catalog-retry');
-      if (btn) btn.onclick = load;
-      countEl.textContent = 'Error';
-    }
+  try {
+    const cr = await fetch('/api/categories');
+    const cd = await cr.json();
+    nav.append(makeChip('All', ''));
+    (cd.items || []).forEach(c => nav.append(makeChip(c.name, c.slug)));
+  } catch (e) {
+    nav.append(makeChip('All', ''), makeChip('Movies', 'movies'), makeChip('Web Series', 'web-series'));
   }
 
-  load();
+  function renderCatalogPage() {
+    const pagEl = document.getElementById('catalog-pagination');
+    const maxPages = Math.max(1, Math.ceil(catalogItems.length / CATALOG_PER_PAGE));
+    catalogPage = Math.min(Math.max(1, catalogPage), maxPages);
+    const start = (catalogPage - 1) * CATALOG_PER_PAGE;
+    grid.innerHTML = '';
+    catalogItems.slice(start, start + CATALOG_PER_PAGE).forEach(p => grid.append(card(p)));
+    if (!pagEl) return;
+    pagEl.hidden = maxPages <= 1;
+    pagEl.innerHTML = '';
+    if (maxPages <= 1) return;
+    const makeBtn = (label, target, disabled = false, active = false) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.disabled = disabled;
+      if (active) b.classList.add('active');
+      b.onclick = () => { catalogPage = target; renderCatalogPage(); document.getElementById('catalog')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      pagEl.appendChild(b);
+    };
+    makeBtn('‹', catalogPage - 1, catalogPage <= 1);
+    const first = Math.max(1, Math.min(catalogPage - 2, maxPages - 4));
+    for (let n = first; n <= Math.min(maxPages, first + 4); n++) makeBtn(String(n), n, false, n === catalogPage);
+    makeBtn('›', catalogPage + 1, catalogPage >= maxPages);
+  }
+
+  async function load() {
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (category) qs.set('category', category);
+    const r = await fetch('/api/catalog?' + qs.toString());
+    const d = await r.json();
+    const items = d.items || [];
+    countEl.textContent = items.length ? (items.length + ' titles') : '0 titles';
+    applyHero(items);
+    if (!q && items.length) {
+      trend.style.display = 'flex';
+      if (trendHead) trendHead.style.display = 'flex';
+      trend.innerHTML = '';
+      items.slice(0, 12).forEach(p => trend.append(card(p)));
+      const prev = document.getElementById('trendPrev');
+      const next = document.getElementById('trendNext');
+      if (prev) prev.onclick = () => trend.scrollBy({ left: -420, behavior: 'smooth' });
+      if (next) next.onclick = () => trend.scrollBy({ left: 420, behavior: 'smooth' });
+    } else {
+      trend.style.display = 'none';
+      if (trendHead) trendHead.style.display = 'none';
+    }
+    if (!items.length) {
+      grid.innerHTML = '<p class="muted" style="grid-column:1/-1;padding:48px 0;text-align:center">No titles found.</p>';
+      return;
+    }
+    catalogItems = items;
+    catalogPage = 1;
+    renderCatalogPage();
+  }
+  await load();
 })();
 </script>
 {% endblock %}
