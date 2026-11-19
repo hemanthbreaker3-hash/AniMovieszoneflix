@@ -45,3 +45,11 @@ The command only accepts an exact slug or exact case-insensitive title match. Pa
 ## Automatic web-container replacement
 
 Run `./fix-containerconfig.sh` from the extracted project directory. It detects Docker Compose V2 when available, removes only old Compose-labeled `web` containers for this project, rebuilds the web image, and starts the replacement. It does not remove Redis, named volumes, or database data. It prints container status and recent logs. If the project directory name differs from the Compose project name, set `COMPOSE_PROJECT_NAME` before running.
+
+
+## Cinema UI + season selector update
+- Updated the site typography to Outfit + DM Sans and refined the global branding with wider uppercase tracking.
+- Added a cinematic gold film/play emblem at `app/static/images/cinema-mark.png`.
+- Refined the home catalogue toward the supplied dark cinema dashboard reference.
+- Rebuilt the watch-page season/episode selector: only seasons actually found in episode labels are shown, seasons are numerically ordered, and selecting a season filters strictly to that season. Added an All Seasons view and stable episode ordering.
+- Season-only headings are no longer misread as Season 1 episodes.
