@@ -300,7 +300,11 @@
 
   var engine;
   if (forced === 'wasm' || forced === 'native') engine = forced;
-  else engine = canWasm ? 'wasm' : 'native';
+  else {
+    var path = (window.location.pathname || '').toLowerCase();
+    var isMkv = /\\.mkv(?:$|[?#])/.test(path) || /mkv/i.test(document.title || '');
+    engine = (isMkv && canWasm) ? 'wasm' : 'native';
+  }
 
   try {
     var pref = localStorage.getItem('AniMoviesZoneflix:engine');
@@ -393,13 +397,13 @@
       <div class="player-box">
         <div class="player-wrapper" id="playerWrapper">\n          <div class="player-brand-float" id="playerBrandFloat">{{ BRANDING }}</div>
           <movi-player id="moviPlayer"
-            playsinline controls preload="auto" resume
+            playsinline controls autoplay preload="auto" resume
             theme="dark" themecolor="#8b5cf6"
             subtitleedge="outline"
             style="display:block"
             class="movi-bar-collapsed"
             tabindex="0"></movi-player>
-          <video id="nativePlayer" playsinline controls preload="auto" crossorigin="anonymous" style="display:none"></video>
+          <video id="nativePlayer" playsinline controls autoplay preload="auto" crossorigin="anonymous" style="display:none"></video>
           <div class="player-loading" id="playerLoading"><div class="spinner"></div></div>
           <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()" aria-label="Switch player" title="Switch player">⇄</button>
 
@@ -584,6 +588,28 @@ function captureSwitchPosition() {
     switchPlaying = !el.paused;
   } catch (_) { switchAt = 0; switchPlaying = false; }
 }
+// Start playback as soon as the selected source is ready. Browsers may block
+// audible autoplay; in that case retry muted (the user can unmute with controls).
+function requestAutoPlay(el) {
+  if (!el) return;
+  const attempt = () => {
+    try {
+      const result = el.play && el.play();
+      if (result && typeof result.then === 'function') {
+        result.catch(() => {
+          try {
+            el.muted = true;
+            const mutedResult = el.play && el.play();
+            if (mutedResult && mutedResult.catch) mutedResult.catch(() => {});
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+  };
+  if (el.readyState >= 2) attempt();
+  else el.addEventListener('canplay', attempt, { once: true });
+}
+
 function applySwitchPosition(el) {
   if (!el || !switchAt || switchAt < 1) return;
   const apply = () => {
@@ -1040,6 +1066,7 @@ function initNative(reason) {
   if (nativeTools) nativeTools.style.display = 'flex';
   if (fixAudioBtn) fixAudioBtn.style.display = '';
   setNativeSource(primaryPlayUrl(0), useCompatible ? 'video/mp4' : (PLAYER_MIME || 'video/mp4'));
+  requestAutoPlay(nativePlayer);
   loadTracks();
   hideLoading();
   if (nativeSwitch) nativeSwitch.hidden = true;
@@ -1101,6 +1128,7 @@ async function initWasm() {
     if (!wasmLoaded) {
       wasmLoaded = true;
       moviPlayer.src = STREAM_URL;
+      requestAutoPlay(moviPlayer);
     } else {
       applySwitchPosition(moviPlayer);
     }

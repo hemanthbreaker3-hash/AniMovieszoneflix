@@ -2109,7 +2109,9 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   var forced = params.get('engine');
   var canWasm = false;
   try { canWasm = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { canWasm = false; }
-  var engine = (forced === 'wasm' || forced === 'native') ? forced : (canWasm ? 'wasm' : 'native');
+  var isMkv = /\\.mkv(?:$|[?#])/i.test(window.location.pathname || '') ||
+              /\\.mkv\\b/i.test(document.title || '');
+   var engine = (forced === 'wasm' || forced === 'native') ? forced : ((isMkv && canWasm) ? 'wasm' : 'native');
   window.__AniMoviesZoneflixPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
   function addLink(rel, href, attrs) {
     var l = document.createElement('link');
@@ -2367,18 +2369,43 @@ function initNative(reason) {
     try { nativePlayer.removeAttribute('crossorigin'); } catch (_) {}
     if (!nativeLoaded) {
       nativeLoaded = true;
+      nativePlayer.preload = 'auto';
+      nativePlayer.playsInline = true;
+      nativePlayer.setAttribute('playsinline', '');
+      nativePlayer.setAttribute('webkit-playsinline', '');
       nativePlayer.src = FILE_URL;
       try { nativePlayer.load(); } catch (_) {}
-      try { const p = nativePlayer.play(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+      // Playback is user-gesture aware; never force an autoplay retry loop.
       nativePlayer.addEventListener('error', () => {
-        if (nativePlayer.src.indexOf('/remux/') === -1) {
+        if (!nativePlayer.dataset.remuxTried && nativePlayer.src.indexOf('/remux/') === -1) {
+          nativePlayer.dataset.remuxTried = '1';
+          const resumeAt = Number(nativePlayer.currentTime || 0);
           nativePlayer.src = REMUX_URL;
-          try { nativePlayer.load(); } catch (_) {}
+          nativePlayer.load();
+          if (resumeAt > 0) nativePlayer.addEventListener('loadedmetadata', () => {
+            try { nativePlayer.currentTime = resumeAt; } catch (_) {}
+          }, { once: true });
         } else {
           hideLoading();
-          showToast('Cannot play here — use Download or external player');
+          showToast('Cannot play this format — use Download or an external player');
         }
-      }, { once: true });
+      });
+      nativePlayer.addEventListener('waiting', () => {
+        showLoading();
+        clearTimeout(nativePlayer._bufferHideTimer);
+        nativePlayer._bufferHideTimer = setTimeout(() => {
+          if (nativePlayer.readyState >= 3) hideLoading();
+        }, 12000);
+      });
+      nativePlayer.addEventListener('playing', () => {
+        clearTimeout(nativePlayer._bufferHideTimer);
+        hideLoading();
+      });
+      nativePlayer.addEventListener('canplay', hideLoading);
+      nativePlayer.addEventListener('stalled', () => {
+        // Let the browser continue its byte-range request; show a non-blocking status only.
+        console.debug('[player] network stalled; waiting for stream range response');
+      });
     }
   }
   nativePlayer && nativePlayer.addEventListener('playing', hideLoading, { once: true });
@@ -2461,8 +2488,8 @@ function switchEngine() {
 
 // Boot like DDStream: wasm first when WebGL2 available
 showLoading();
-if (engine === 'wasm') { warmMedia(FILE_URL); initWasm(); }
-else initNative(forcedEngine ? 'forced-native' : 'no-webgl2');
+if (engine === 'wasm') { initWasm(); }
+else initNative(forcedEngine ? 'forced-native' : 'native-first');
 setTimeout(() => { if (engine === 'wasm' && nativeSwitch) nativeSwitch.hidden = false; }, 12000);
 
 const dlBtn = document.getElementById('direct-dl-btn');
