@@ -751,6 +751,7 @@ function renderIndexHtml(initialItems, initialCategories, queryStr = '') {
 <div class="poster-grid" id="catalog-grid">
   <p class="muted" style="grid-column:1/-1;padding:40px 0;text-align:center">Loading titles…</p>
 </div>
+<div class="related-pager catalog-pager" id="catalogPager" hidden></div>
 
 <script>
 window.__INITIAL_CATALOG__ = ${safeJsonForScript(initialItems)};
@@ -848,7 +849,13 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
       trend.style.display = 'none';
     }
 
-    for (const p of list) {
+    const pager = document.getElementById('catalogPager');
+    const PER_PAGE = 24;
+    let catalogPage = 1;
+    const maxPages = Math.max(1, Math.ceil(list.length / PER_PAGE));
+    const drawPage = () => {
+      el.innerHTML = '';
+      for (const p of list.slice((catalogPage - 1) * PER_PAGE, catalogPage * PER_PAGE)) {
       const a = document.createElement('a');
       a.className = 'poster-card';
       a.href = '/title/' + encodeURIComponent(p.slug);
@@ -867,7 +874,25 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
       info.append(t, m);
       a.append(img, info);
       el.append(a);
-    }
+      }
+      if (pager) {
+        pager.hidden = maxPages <= 1;
+        pager.innerHTML = '';
+        if (maxPages > 1) {
+          const make = (label, target, disabled = false, active = false) => {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.disabled = disabled;
+            if (active) b.classList.add('active');
+            b.onclick = () => { catalogPage = target; drawPage(); document.getElementById('catalog')?.scrollIntoView({behavior:'smooth',block:'start'}); };
+            pager.appendChild(b);
+          };
+          make('‹', catalogPage - 1, catalogPage <= 1);
+          const first = Math.max(1, Math.min(catalogPage - 2, maxPages - 4));
+          for (let n = first; n <= Math.min(maxPages, first + 4); n++) make(String(n), n, false, n === catalogPage);
+          make('›', catalogPage + 1, catalogPage >= maxPages);
+        }
+      }
+    };
+    drawPage();
   }
 
   function filterInitialItems() {
@@ -2076,7 +2101,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
 <style>
     ${!settings.built_in_player_enabled ? '.player-shell,.card.info{display:none!important}' : ''}
     ${!settings.streaming_enabled ? '.player-shell{display:none!important}' : ''}
-    .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 28px rgba(255,106,0,.18)}
+    .player-shell{position:relative;border-radius:20px;padding:2px;overflow:hidden;background:#0a0a14;box-shadow:0 18px 48px rgba(0,0,0,.58),0 0 24px rgba(255,106,0,.16)}
     .player-box{background:#000;border-radius:18px;overflow:hidden;position:relative;z-index:1}
     .player-wrapper{width:100%;aspect-ratio:16/9;position:relative;background:#000;contain:paint}
     .player-wrapper video,
@@ -2116,9 +2141,12 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
     .related-card .thumb::after{content:"▶";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);font-size:22px}
     .related-card .meta-line{padding:8px 10px;font-size:12px;font-weight:600;line-height:1.3}
     .related-pager{display:flex;align-items:center;gap:8px;margin-top:12px;justify-content:center}
+    .related-pager[hidden]{display:none!important}
     .related-pager button{background:#12122a;border:1px solid #2a2a3a;color:#fff;border-radius:8px;padding:8px 12px;font:600 13px system-ui;cursor:pointer}
     .related-pager button:disabled{opacity:.4;cursor:not-allowed}
     .related-pager span{color:#9ca3af;font-size:13px}
+    .related-pager button.active{background:linear-gradient(125deg,#ff6a00,#ffb74d);border-color:transparent;color:#180b02;font-weight:900}
+    .episode-tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.episode-tools input,.episode-tools select{min-height:40px;border:1px solid #2a2a3a;border-radius:10px;background:#0d0d16;color:#fff;padding:8px 12px;outline:none}.episode-tools input{flex:1;min-width:160px}.episode-tools input:focus,.episode-tools select:focus{border-color:#ff8a33;box-shadow:0 0 0 3px rgba(255,106,0,.12)}.episode-count{font-size:12px;color:#9ca3af;align-self:center}
     .notice{padding:11px 13px;border-radius:11px;background:rgba(59,130,246,.06);border:1px solid rgba(255,106,0,.18);color:var(--muted);font-size:12px;margin-top:12px}
     @media(min-width:900px){.watch-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.side{align-self:start;position:sticky;top:72px}}
   </style>`;
@@ -2126,12 +2154,9 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   const relatedSection = watchGroups.length
     ? `<div class="related-groups card" style="margin-top:14px;padding:16px">
       <h3>Episodes / groups</h3>
+      <div class="episode-tools"><input id="episodeSearch" type="search" placeholder="Search episode (S01E01)…" aria-label="Search episodes"><select id="seasonFilter" aria-label="Filter season"><option value="all">All seasons</option></select><span class="episode-count" id="episodeCount"></span></div>
       <div class="related-grid" id="relatedGrid"></div>
-      <div class="related-pager" id="relatedPager" hidden>
-        <button type="button" id="relPrev">←</button>
-        <span id="relInfo">1 / 1</span>
-        <button type="button" id="relNext">→</button>
-      </div>
+      <div class="related-pager" id="relatedPager" hidden></div>
     </div>`
     : '';
 
@@ -2498,49 +2523,16 @@ document.addEventListener('click', () => {
 })();
 
 (function setupRelated() {
-  const grid = document.getElementById('relatedGrid');
-  const pager = document.getElementById('relatedPager');
+  const grid = document.getElementById('relatedGrid'), pager = document.getElementById('relatedPager');
   if (!grid || !WATCH_GROUPS.length) return;
-  const PER = 12;
-  let page = Math.floor(GROUP_INDEX / PER) + 1;
-  const max = Math.max(1, Math.ceil(WATCH_GROUPS.length / PER));
-  function render() {
-    grid.innerHTML = '';
-    const start = (page - 1) * PER;
-    WATCH_GROUPS.slice(start, start + PER).forEach((g, localIdx) => {
-      const idx = start + localIdx;
-      const first = (g.buttons && g.buttons[0]) || null;
-      if (!first) return;
-      const href = watchHrefFor(idx, 0) || first.url;
-      const card = document.createElement('a');
-      card.className = 'related-card' + (idx === GROUP_INDEX ? ' active' : '');
-      card.href = href;
-      const thumb = document.createElement('div');
-      thumb.className = 'thumb';
-      if (POSTER_URL) thumb.style.backgroundImage = 'url("' + String(POSTER_URL).replace(/"/g, '\\\\"') + '")';
-      const meta = document.createElement('div');
-      meta.className = 'meta-line';
-      meta.textContent = g.name || ('Group ' + (idx + 1));
-      card.appendChild(thumb);
-      card.appendChild(meta);
-      grid.appendChild(card);
-    });
-    if (pager) {
-      if (max <= 1) pager.hidden = true;
-      else {
-        pager.hidden = false;
-        const info = document.getElementById('relInfo');
-        if (info) info.textContent = page + ' / ' + max;
-        const rp = document.getElementById('relPrev');
-        const rn = document.getElementById('relNext');
-        if (rp) rp.disabled = page <= 1;
-        if (rn) rn.disabled = page >= max;
-      }
-    }
-  }
-  document.getElementById('relPrev')?.addEventListener('click', () => { if (page > 1) { page--; render(); } });
-  document.getElementById('relNext')?.addEventListener('click', () => { if (page < max) { page++; render(); } });
-  render();
+  const PER = 8, search = document.getElementById('episodeSearch'), seasonSelect = document.getElementById('seasonFilter'), count = document.getElementById('episodeCount');
+  let page = 1;
+  const seasonOf = name => { const m=String(name||'').match(/(?:season\s*|s)(\d{1,2})/i); return m?'Season '+Number(m[1]):'Other'; };
+  const seasons=[...new Set(WATCH_GROUPS.map(g=>seasonOf(g.name)))].sort((a,b)=>a==='Other'?1:b==='Other'?-1:Number(a.replace(/\D/g,''))-Number(b.replace(/\D/g,'')));
+  seasons.forEach(season=>{const o=document.createElement('option');o.value=season;o.textContent=season;seasonSelect.appendChild(o);});
+  function filtered(){const term=(search?.value||'').trim().toLowerCase(),season=seasonSelect?.value||'all';return WATCH_GROUPS.map((g,idx)=>({g,idx})).filter(({g})=>(season==='all'||seasonOf(g.name)===season)&&(!term||String(g.name||'').toLowerCase().includes(term)));}
+  function render(){const rows=filtered(),max=Math.max(1,Math.ceil(rows.length/PER));page=Math.min(Math.max(1,page),max);grid.innerHTML='';rows.slice((page-1)*PER,page*PER).forEach(({g,idx})=>{const first=(g.buttons||[])[0];if(!first)return;const card=document.createElement('a');card.className='related-card'+(idx===GROUP_INDEX?' active':'');card.href=watchHrefFor(idx,0)||first.url;const thumb=document.createElement('div');thumb.className='thumb';if(POSTER_URL)thumb.style.backgroundImage='url("'+String(POSTER_URL).replace(/"/g,'\\"')+'")';const meta=document.createElement('div');meta.className='meta-line';meta.textContent=g.name||('Episode '+(idx+1));card.append(thumb,meta);grid.append(card);});if(count)count.textContent=rows.length+' episode'+(rows.length===1?'':'s');pager.hidden=max<=1;pager.innerHTML='';if(max<=1)return;const make=(label,target,disabled=false,active=false)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=disabled;if(active)b.classList.add('active');b.onclick=()=>{page=target;render();};pager.appendChild(b);};make('‹',page-1,page<=1);const first=Math.max(1,Math.min(page-2,max-4));for(let n=first;n<=Math.min(max,first+4);n++)make(String(n),n,false,n===page);make('›',page+1,page>=max);}
+  search?.addEventListener('input',()=>{page=1;render();});seasonSelect?.addEventListener('change',()=>{page=1;render();});page=Math.floor(GROUP_INDEX/PER)+1;render();
 })();
 
 async function copyStream() {

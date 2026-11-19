@@ -2,6 +2,7 @@
 {% block title %}AniMoviesZoneflix · Movies & Series{% endblock %}
 {% block nav_home %}active{% endblock %}
 {% block content %}
+<style>#catalog-pagination[hidden]{display:none!important}#catalog-pagination button{background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:700}#catalog-pagination button:disabled{opacity:.4;cursor:not-allowed}#catalog-pagination button.active{background:linear-gradient(125deg,var(--accent),var(--accent-2));color:#180b02;border-color:transparent}</style>
 <section class="backdrop-hero" id="homeHero" style="min-height:clamp(240px,48vw,480px)">
   <div class="backdrop-img" id="homeHeroImg"></div>
   <div class="backdrop-scrim"></div>
@@ -29,6 +30,7 @@
 <div class="poster-grid" id="catalog-grid">
   <p class="muted" style="grid-column:1/-1;padding:48px 0;text-align:center">Loading titles…</p>
 </div>
+<div id="catalog-pagination" class="related-pager" hidden aria-label="Catalog pagination" style="display:flex;align-items:center;justify-content:center;gap:8px;margin:20px 0;flex-wrap:wrap"></div>
 
 <script>
 (async () => {
@@ -36,6 +38,9 @@
   const nav = document.getElementById('category-nav');
   const countEl = document.getElementById('result-count');
   const trend = document.getElementById('trending-row');
+  let catalogPage = 1;
+  const CATALOG_PER_PAGE = 24;
+  let catalogItems = [];
   const params = new URLSearchParams(location.search);
   let category = params.get('category') || '';
   let q = params.get('q') || '';
@@ -102,6 +107,30 @@
     return a;
   }
 
+  function renderCatalogPage() {
+    const pages = Math.max(1, Math.ceil(catalogItems.length / CATALOG_PER_PAGE));
+    catalogPage = Math.min(Math.max(1, catalogPage), pages);
+    grid.innerHTML = '';
+    catalogItems.slice((catalogPage - 1) * CATALOG_PER_PAGE, catalogPage * CATALOG_PER_PAGE).forEach(p => grid.appendChild(card(p)));
+    const pager = document.getElementById('catalog-pagination');
+    if (!pager) return;
+    pager.hidden = pages <= 1;
+    pager.innerHTML = '';
+    if (pages <= 1) return;
+    const make = (label, page, disabled = false, active = false) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+      b.disabled = disabled; if (active) b.classList.add('active');
+      b.setAttribute('aria-label', label === '‹' ? 'Previous page' : label === '›' ? 'Next page' : 'Page ' + label);
+      b.onclick = () => { catalogPage = page; renderCatalogPage(); document.getElementById('catalog')?.scrollIntoView({behavior:'smooth',block:'start'}); };
+      pager.appendChild(b);
+    };
+    make('‹', catalogPage - 1, catalogPage <= 1);
+    const start = Math.max(1, Math.min(catalogPage - 2, pages - 4));
+    const end = Math.min(pages, start + 4);
+    for (let n = start; n <= end; n++) make(String(n), n, false, n === catalogPage);
+    make('›', catalogPage + 1, catalogPage >= pages);
+  }
+
   function chip(label, value, active) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -125,11 +154,12 @@
       const qs = new URLSearchParams();
       if (category) qs.set('category', category);
       if (q) qs.set('q', q);
-      const r = await fetch('/api/public/catalog?' + qs.toString(), { cache: 'no-store' });
+      const r = await fetch('/api/catalog?' + qs.toString(), { cache: 'no-store' });
       if (!r.ok) throw new Error('Catalog API returned HTTP ' + r.status);
       const data = await r.json();
       const list = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
-      const cats = Array.isArray(data.categories) ? data.categories : [];
+      let cats = Array.isArray(data.categories) ? data.categories : [];
+      if (!cats.length) { try { const cr = await fetch('/api/categories', {cache:'no-store'}); if (cr.ok) { const cd = await cr.json(); cats = Array.isArray(cd.items) ? cd.items : []; } } catch (_) {} }
 
       countEl.textContent = list.length ? list.length + ' titles' : '0 titles';
       nav.innerHTML = '';
@@ -142,7 +172,9 @@
         grid.innerHTML = '<p class="muted" style="grid-column:1/-1;padding:48px 0;text-align:center">No titles found. Publish movies or series from the bot or the panel.</p>';
         return;
       }
-      list.forEach(p => grid.appendChild(card(p)));
+      catalogItems = list;
+      catalogPage = 1;
+      renderCatalogPage();
       applyHero(list);
 
       const top = list.slice(0, 12);
