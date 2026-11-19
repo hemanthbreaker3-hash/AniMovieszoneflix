@@ -2111,7 +2111,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
   try { canWasm = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { canWasm = false; }
   var isMkv = /\\.mkv(?:$|[?#])/i.test(window.location.pathname || '') ||
               /\\.mkv\\b/i.test(document.title || '');
-   var engine = (forced === 'wasm' || forced === 'native') ? forced : ((isMkv && canWasm) ? 'wasm' : 'native');
+   var engine = (forced === 'native') ? 'native' : 'wasm'; // Movi Player is the default built-in engine.
   window.__AniMoviesZoneflixPlayer = { initial: engine, engine: engine, forced: !!forced, cdn: CDN };
   function addLink(rel, href, attrs) {
     var l = document.createElement('link');
@@ -2218,7 +2218,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
       <div class="player-box">
         <div class="player-wrapper" id="playerWrapper">
           <movi-player id="moviPlayer"
-            playsinline controls preload="auto" resume
+            playsinline controls autoplay muted preload="auto" resume
             theme="dark" themecolor="#8b5cf6"
             subtitleedge="outline"
             style="display:none;width:100%;height:100%"
@@ -2414,6 +2414,34 @@ function initNative(reason) {
   setTimeout(hideLoading, 12000);
 }
 
+function startMoviAutoplay() {
+  if (!moviPlayer) return;
+  try {
+    moviPlayer.setAttribute('autoplay', '');
+    moviPlayer.setAttribute('playsinline', '');
+    // Muted autoplay is the only reliable automatic-start mode on mobile browsers.
+    moviPlayer.muted = true;
+    moviPlayer.setAttribute('muted', '');
+  } catch (_) {}
+  let started = false;
+  const attempt = () => {
+    if (started) return;
+    try {
+      const p = moviPlayer.play && moviPlayer.play();
+      if (p && typeof p.then === 'function') p.then(() => { started = true; }).catch(() => {
+        try {
+          moviPlayer.muted = true;
+          const retry = moviPlayer.play && moviPlayer.play();
+          if (retry && retry.then) retry.then(() => { started = true; }).catch(() => {});
+        } catch (_) {}
+      });
+    } catch (_) {}
+  };
+  ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach(evt => moviPlayer.addEventListener(evt, attempt));
+  attempt();
+  [250, 800, 1600, 3000, 5000].forEach(ms => setTimeout(attempt, ms));
+}
+
 function startWasm() {
   if (!wasmWired && moviPlayer) {
     wasmWired = true;
@@ -2428,8 +2456,9 @@ function startWasm() {
     if (!wasmLoaded) {
       wasmLoaded = true;
       moviPlayer.src = FILE_URL;
-      try { if (moviPlayer.play) moviPlayer.play(); } catch (_) {}
+      try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
     }
+    startMoviAutoplay();
   }
   setTimeout(hideLoading, 15000);
 }

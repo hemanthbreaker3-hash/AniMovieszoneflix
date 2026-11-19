@@ -303,12 +303,12 @@
   else {
     var path = (window.location.pathname || '').toLowerCase();
     var isMkv = /\\.mkv(?:$|[?#])/.test(path) || /mkv/i.test(document.title || '');
-    engine = (isMkv && canWasm) ? 'wasm' : 'native';
+    engine = 'wasm'; // Movi Player is the built-in default for every supported format.
   }
 
   try {
     var pref = localStorage.getItem('AniMoviesZoneflix:engine');
-    if (!forced && (pref === 'wasm' || pref === 'native')) engine = pref;
+    if (!forced) engine = 'wasm'; // Ignore stale engine preferences; keep native available only as fallback/manual override.
   } catch (_) {}
 
   window.__AniMoviesZoneflixPlayer = {
@@ -397,7 +397,7 @@
       <div class="player-box">
         <div class="player-wrapper" id="playerWrapper">\n          <div class="player-brand-float" id="playerBrandFloat">{{ BRANDING }}</div>
           <movi-player id="moviPlayer"
-            playsinline controls autoplay preload="auto" resume
+            playsinline controls autoplay muted preload="auto" resume
             theme="dark" themecolor="#8b5cf6"
             subtitleedge="outline"
             style="display:block"
@@ -588,26 +588,41 @@ function captureSwitchPosition() {
     switchPlaying = !el.paused;
   } catch (_) { switchAt = 0; switchPlaying = false; }
 }
-// Start playback as soon as the selected source is ready. Browsers may block
-// audible autoplay; in that case retry muted (the user can unmute with controls).
+// Movi custom elements may emit readiness events later than the source assignment.
+// Start muted first (required by most mobile autoplay policies), then let the user
+// enable sound with the existing volume controls. Never rely on a single canplay event.
 function requestAutoPlay(el) {
   if (!el) return;
+  try {
+    el.setAttribute('autoplay', '');
+    el.setAttribute('playsinline', '');
+    el.muted = true;
+    el.setAttribute('muted', '');
+  } catch (_) {}
+  let started = false;
   const attempt = () => {
+    if (started) return;
     try {
       const result = el.play && el.play();
       if (result && typeof result.then === 'function') {
-        result.catch(() => {
+        result.then(() => { started = true; }).catch(() => {
+          // Retry muted explicitly; custom-element play() can reject before its
+          // internal media element has completed initialization.
           try {
             el.muted = true;
-            const mutedResult = el.play && el.play();
-            if (mutedResult && mutedResult.catch) mutedResult.catch(() => {});
+            const retry = el.play && el.play();
+            if (retry && retry.then) retry.then(() => { started = true; }).catch(() => {});
           } catch (_) {}
         });
       }
     } catch (_) {}
   };
-  if (el.readyState >= 2) attempt();
-  else el.addEventListener('canplay', attempt, { once: true });
+  ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach(evt => {
+    el.addEventListener(evt, attempt);
+  });
+  attempt();
+  // Movi initializes its internal media element asynchronously after src is set.
+  [250, 800, 1600, 3000, 5000].forEach(ms => setTimeout(attempt, ms));
 }
 
 function applySwitchPosition(el) {
@@ -1128,6 +1143,7 @@ async function initWasm() {
     if (!wasmLoaded) {
       wasmLoaded = true;
       moviPlayer.src = STREAM_URL;
+      try { if (typeof moviPlayer.load === 'function') moviPlayer.load(); } catch (_) {}
       requestAutoPlay(moviPlayer);
     } else {
       applySwitchPosition(moviPlayer);
