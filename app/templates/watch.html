@@ -772,7 +772,7 @@ document.addEventListener('click', () => {
   }
 })();
 
-/* Episode / Seasons right-side EP list */
+/* Episode / Seasons right-side EP list: season and episode names only; no quality detection. */
 (function setupRelated() {
   const list = document.getElementById('sideEpList');
   const seasonSelect = document.getElementById('seasonFilter');
@@ -784,60 +784,63 @@ document.addEventListener('click', () => {
     if (card) card.style.display = 'none';
     return;
   }
-  const seasonOf = (name) => {
-    const text = String(name || '');
-    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
-    return m ? 'Season ' + Number(m[1]) : 'Season 1';
-  };
-  const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))];
-  seasons.sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
-  seasons.forEach(season => {
-    if (!seasonSelect) return;
-    const o = document.createElement('option');
-    o.value = season; o.textContent = season; seasonSelect.appendChild(o);
-  });
+  function parseEpisode(name) {
+    const text = String(name || '').trim();
+    let m = text.match(/\bS(?:eason\s*)?(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?(\d{1,4})\b/i)
+      || text.match(/\bSeason\s*(\d{1,3})\s*(?:Episode|Ep)\s*(\d{1,4})\b/i)
+      || text.match(/\b(\d{1,3})\s*[xX]\s*(\d{1,4})\b/i);
+    if (m) return { season: Number(m[1]), episode: Number(m[2]) };
+    m = text.match(/\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i);
+    if (m) return { season: 1, episode: Number(m[1]) };
+    return null;
+  }
+  const rows = WATCH_GROUPS.map((g, idx) => ({ g, idx, parsed: parseEpisode(g.name) }))
+    .filter(row => row.parsed && Number.isFinite(row.parsed.season) && Number.isFinite(row.parsed.episode));
+  rows.sort((a,b) => a.parsed.season-b.parsed.season || a.parsed.episode-b.parsed.episode || a.idx-b.idx);
+  const seasons = [...new Set(rows.map(row => row.parsed.season))].sort((a,b)=>a-b);
+  if (!rows.length || !seasons.length) {
+    const card = document.getElementById('sideEpsCard');
+    if (card) card.style.display = 'none';
+    return;
+  }
+  if (seasonSelect) {
+    seasonSelect.innerHTML = '';
+    seasons.forEach(season => {
+      const o=document.createElement('option'); o.value=String(season); o.textContent='Season '+season; seasonSelect.appendChild(o);
+    });
+    seasonSelect.value=String(seasons[0]);
+  }
+  let selected=String(seasons[0]);
   function setActiveSeasonUI(value) {
-    if (seasonBar) seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
-    if (seasonSelect) seasonSelect.value = value;
+    selected=value;
+    if (seasonBar) seasonBar.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.season===value));
+    if (seasonSelect) seasonSelect.value=value;
   }
   if (seasonBar) {
-    const add = (label, value) => {
-      const b = document.createElement('button');
-      b.type = 'button'; b.textContent = label; b.dataset.season = value;
-      b.className = value === 'all' ? 'active' : '';
-      b.onclick = () => { setActiveSeasonUI(value); render(); };
-      seasonBar.appendChild(b);
-    };
-    add('All', 'all');
-    seasons.forEach(s => add(s.replace(/^Season\s+/i, 'S'), s));
-  }
-  function filtered() {
-    const term = (search?.value || '').trim().toLowerCase();
-    const season = seasonSelect?.value || 'all';
-    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
-      const name = String(g.name || '');
-      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
+    seasonBar.innerHTML='';
+    seasons.forEach(season=>{
+      const b=document.createElement('button'); b.type='button'; b.textContent='S'+String(season).padStart(2,'0'); b.dataset.season=String(season);
+      b.className=String(season)===selected?'active':'';
+      b.onclick=()=>{setActiveSeasonUI(String(season));render();}; seasonBar.appendChild(b);
     });
   }
   function render() {
-    const rows = filtered();
-    list.innerHTML = '';
-    rows.forEach(({ g, idx }) => {
-      const first = (g.buttons || [])[0];
-      if (!first) return;
-      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
-      const a = document.createElement('a');
-      a.className = 'side-ep-btn' + (idx === GROUP_INDEX ? ' active' : '');
-      a.href = href;
-      const tag = document.createElement('span'); tag.className = 'ep-tag'; tag.textContent = 'EP ' + (idx + 1);
-      const name = document.createElement('span'); name.className = 'ep-name'; name.textContent = g.name || ('Episode ' + (idx + 1));
-      a.append(tag, name);
-      list.appendChild(a);
+    const term=(search?.value||'').trim().toLowerCase();
+    const season=selected;
+    const filtered=rows.filter(row=>String(row.parsed.season)===season && (!term || String(row.g.name||'').toLowerCase().includes(term)));
+    list.innerHTML='';
+    filtered.forEach(({g,idx,parsed})=>{
+      const first=(g.buttons||[])[0]; if(!first)return;
+      const href=(typeof watchHrefFor==='function'?watchHrefFor(idx,0):null)||first.url;
+      const a=document.createElement('a'); a.className='side-ep-btn'+(idx===GROUP_INDEX?' active':''); a.href=href;
+      const tag=document.createElement('span');tag.className='ep-tag';tag.textContent='EP '+String(parsed.episode).padStart(2,'0');
+      const name=document.createElement('span');name.className='ep-name';name.textContent=g.name||('Episode '+parsed.episode);
+      a.append(tag,name);list.appendChild(a);
     });
-    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
+    if(count)count.textContent=filtered.length+' episode'+(filtered.length===1?'':'s');
   }
-  search?.addEventListener('input', render);
-  seasonSelect?.addEventListener('change', () => { setActiveSeasonUI(seasonSelect.value); render(); });
+  search?.addEventListener('input',render);
+  seasonSelect?.addEventListener('change',()=>{setActiveSeasonUI(seasonSelect.value);render();});
   render();
 })();
 
