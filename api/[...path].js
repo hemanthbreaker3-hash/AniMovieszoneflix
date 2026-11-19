@@ -2601,71 +2601,160 @@ document.addEventListener('click', () => {
   const search = document.getElementById('episodeSearch');
   const count = document.getElementById('episodeCount');
   const seasonBar = document.getElementById('sideSeasonBar');
-  if (!list || !WATCH_GROUPS.length) {
-    const card = document.getElementById('sideEpsCard');
+  const card = document.getElementById('sideEpsCard');
+  if (!list || !Array.isArray(WATCH_GROUPS) || !WATCH_GROUPS.length) {
     if (card) card.style.display = 'none';
     return;
   }
-  const seasonOf = name => {
-    const text = String(name || '');
-    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
-    return m ? 'Season ' + Number(m[1]) : 'Season 1';
-  };
-  const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))].sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
-  seasons.forEach(season => {
-    if (!seasonSelect) return;
-    const o = document.createElement('option');
-    o.value = season; o.textContent = season; seasonSelect.appendChild(o);
-  });
-  function setActiveSeasonUI(value) {
-    if (seasonBar) {
-      seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
+
+  function parseEpisode(value, inheritedSeason) {
+    const text = String(value || '').replace(/[._]+/g, ' ').trim();
+    let m = text.match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[- ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
+      || text.match(/\bSeason\s*0*(\d{1,3})\s*[- ]*(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
+      || text.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
+    if (m) return { season: Number(m[1]), episode: Number(m[2]), explicit: true };
+
+    const seasonMatch = text.match(/\bSeason\s*0*(\d{1,3})\b|\bS0*(\d{1,3})(?!\s*[- ]*E)/i);
+    const season = seasonMatch ? Number(seasonMatch[1] || seasonMatch[2]) :
+      (Number.isInteger(inheritedSeason) ? inheritedSeason : null);
+    m = text.match(/\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i)
+      || text.match(/^\s*0*(\d{1,4})\s*$/);
+    if (m && season) return { season, episode: Number(m[1]), explicit: !!seasonMatch };
+    return null;
+  }
+
+  const rows = [];
+  WATCH_GROUPS.forEach((g, groupIndex) => {
+    if (!g) return;
+    const buttons = Array.isArray(g.buttons) ? g.buttons : [];
+    const groupParsed = parseEpisode(g.name);
+    const groupSeasonMatch = String(g.name || '').match(/\bSeason\s*0*(\d{1,3})\b|\bS0*(\d{1,3})(?!\s*[- ]*E)/i);
+    const inheritedSeason = groupSeasonMatch ? Number(groupSeasonMatch[1] || groupSeasonMatch[2]) : null;
+
+    // Prefer an explicit SxxExx code from a nested button over a generic group label
+    // such as "EP 13". Season-group buttons inherit the parent season.
+    let buttonRows = buttons.map((button, buttonIndex) => {
+      const parsed = parseEpisode(button && (button.name || button.label || button.text), inheritedSeason);
+      return parsed ? { g, groupIndex, buttonIndex, button, parsed } : null;
+    }).filter(Boolean);
+
+    if (buttonRows.some(row => row.parsed.explicit)) {
+      buttonRows = buttonRows.filter(row => row.parsed.explicit);
+    } else if (groupParsed && groupParsed.episode && !inheritedSeason) {
+      buttonRows = [];
     }
-    if (seasonSelect) seasonSelect.value = value;
+
+    if (buttonRows.length) {
+      buttonRows.forEach(row => rows.push(row));
+      return;
+    }
+
+    // Individual episode groups: parse the group name and retain its first playable URL.
+    const parsed = groupParsed || (buttons.length ? parseEpisode(buttons[0] && buttons[0].name) : null);
+    if (parsed && parsed.episode && buttons.length) {
+      const playableIndex = buttons.findIndex(button => button && button.url);
+      if (playableIndex >= 0) rows.push({
+        g, groupIndex, buttonIndex: playableIndex, button: buttons[playableIndex], parsed
+      });
+    }
+  });
+
+  rows.sort((a, b) => a.parsed.season - b.parsed.season ||
+    a.parsed.episode - b.parsed.episode ||
+    a.groupIndex - b.groupIndex || a.buttonIndex - b.buttonIndex);
+
+  // Deduplicate by season/episode while keeping the first valid playable link.
+  const seen = new Set();
+  const episodes = rows.filter(row => {
+    if (!row.button || !row.button.url) return false;
+    const key = row.parsed.season + ':' + row.parsed.episode;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const seasons = [...new Set(episodes.map(row => row.parsed.season))].sort((a,b) => a-b);
+  if (!episodes.length || !seasons.length) {
+    if (card) card.style.display = 'none';
+    return;
   }
-  if (seasonBar) {
-    const add = (label, value) => {
-      const b = document.createElement('button');
-      b.type = 'button'; b.textContent = label; b.dataset.season = value;
-      b.className = value === 'all' ? 'active' : '';
-      b.onclick = () => { setActiveSeasonUI(value); render(); };
-      seasonBar.appendChild(b);
-    };
-    add('All', 'all');
-    seasons.forEach(s => add(s.replace(/^Season\s+/i, 'S'), s));
-  }
-  function filtered() {
-    const term = (search && search.value || '').trim().toLowerCase();
-    const season = (seasonSelect && seasonSelect.value) || 'all';
-    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
-      const name = String(g.name || '');
-      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
+
+  const current = episodes.find(row =>
+    row.groupIndex === Number(GROUP_INDEX) &&
+    row.buttonIndex === Number(BUTTON_INDEX));
+  let selected = current ? String(current.parsed.season) :
+    (seasons.includes(1) ? '1' : String(seasons[0]));
+
+  if (seasonSelect) {
+    seasonSelect.innerHTML = '<option value="all">All Seasons</option>';
+    seasons.forEach(season => {
+      const option = document.createElement('option');
+      option.value = String(season);
+      option.textContent = 'Season ' + season;
+      seasonSelect.appendChild(option);
     });
+    seasonSelect.value = selected;
   }
+
+  function setActiveSeasonUI(value) {
+    selected = value;
+    if (seasonSelect) seasonSelect.value = value;
+    if (seasonBar) seasonBar.querySelectorAll('button').forEach(button =>
+      button.classList.toggle('active', button.dataset.season === value));
+  }
+
+  if (seasonBar) {
+    seasonBar.innerHTML = '';
+    [['all', 'All Seasons'], ...seasons.map(season => [String(season), 'Season ' + season])]
+      .forEach(([value, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.dataset.season = value;
+        button.className = value === selected ? 'active' : '';
+        button.addEventListener('click', () => {
+          setActiveSeasonUI(value);
+          render();
+        });
+        seasonBar.appendChild(button);
+      });
+  }
+
   function render() {
-    const rows = filtered();
+    const term = (search && search.value || '').trim().toLowerCase();
+    const filtered = episodes.filter(row =>
+      (selected === 'all' || String(row.parsed.season) === selected) &&
+      (!term || String(row.g.name || '').toLowerCase().includes(term) ||
+        String(row.button.name || '').toLowerCase().includes(term) ||
+        ('ep ' + row.parsed.episode).includes(term) ||
+        ('s' + String(row.parsed.season).padStart(2, '0') + 'e' +
+          String(row.parsed.episode).padStart(2, '0')).includes(term))
+    );
     list.innerHTML = '';
-    rows.forEach(({ g, idx }) => {
-      const first = (g.buttons || [])[0];
-      if (!first) return;
-      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
-      const a = document.createElement('a');
-      a.className = 'side-ep-btn' + (idx === GROUP_INDEX ? ' active' : '');
-      a.href = href;
+    filtered.forEach(row => {
+      const { g, groupIndex, buttonIndex, button, parsed } = row;
+      const href = (typeof watchHrefFor === 'function' ?
+        watchHrefFor(groupIndex, buttonIndex) : null) || button.url;
+      const link = document.createElement('a');
+      link.className = 'side-ep-btn' +
+        (groupIndex === Number(GROUP_INDEX) && buttonIndex === Number(BUTTON_INDEX) ? ' active' : '');
+      link.href = href;
       const tag = document.createElement('span');
       tag.className = 'ep-tag';
-      tag.textContent = 'EP ' + (idx + 1);
+      tag.textContent = 'S' + String(parsed.season).padStart(2, '0') +
+        ' · EP ' + String(parsed.episode).padStart(2, '0');
       const name = document.createElement('span');
       name.className = 'ep-name';
-      name.textContent = g.name || ('Episode ' + (idx + 1));
-      a.append(tag, name);
-      list.appendChild(a);
+      name.textContent = g.name || button.name || ('Episode ' + parsed.episode);
+      link.append(tag, name);
+      list.appendChild(link);
     });
-    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
+    if (count) count.textContent = filtered.length + ' episode' +
+      (filtered.length === 1 ? '' : 's');
   }
+
   search && search.addEventListener('input', render);
   seasonSelect && seasonSelect.addEventListener('change', () => {
-    setActiveSeasonUI(seasonSelect.value);
+    setActiveSeasonUI(seasonSelect.value || 'all');
     render();
   });
   render();
