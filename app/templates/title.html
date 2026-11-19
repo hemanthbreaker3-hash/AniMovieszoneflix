@@ -55,19 +55,6 @@
   .season-selector button{background:#171820!important;color:#c8c6d1!important;border-color:rgba(255,255,255,.1)!important}
   .season-selector button.active{background:linear-gradient(120deg,#e8d9ff,#d8b77e)!important;color:#17151b!important;border:0!important}
   .hero-h1{background:linear-gradient(100deg,#fff 10%,#e6d9ff 60%,#e4bd82)!important;-webkit-background-clip:text!important;background-clip:text!important}
-
-  .season-selector{display:flex;gap:10px;flex-wrap:wrap;padding:14px;margin:4px 0 18px;border:1px solid rgba(228,189,130,.16);border-radius:18px;background:linear-gradient(145deg,rgba(24,22,24,.92),rgba(10,10,12,.92));box-shadow:0 14px 36px rgba(0,0,0,.22)}
-  .season-selector button{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:999px;background:#17171b!important;border:1px solid rgba(255,255,255,.1)!important;color:#d7d3dc!important;font:800 12px/1.2 "Manrope",sans-serif;letter-spacing:.025em;transition:transform .18s,border-color .18s,background .18s}
-  .season-selector button:hover{transform:translateY(-2px);border-color:rgba(228,189,130,.5)!important}
-  .season-selector button.active{background:linear-gradient(120deg,#e8d9ff,#d8b77e)!important;color:#17151b!important;border-color:transparent!important;box-shadow:0 8px 24px rgba(216,183,126,.18)}
-  .season-selector .season-count{font-size:10px;opacity:.75;margin-left:1px}
-  .season-icon{font-size:12px}
-  .hero-detail{gap:clamp(18px,3vw,34px)}
-  .hero-poster{box-shadow:0 22px 60px rgba(0,0,0,.45)}
-  .link-box{border-radius:20px!important}
-  .group-block{border-radius:16px!important;transition:border-color .2s,transform .2s}
-  .group-block:hover{border-color:rgba(228,189,130,.24)!important}
-
 </style>
 {% endblock %}
 {% block content %}
@@ -264,21 +251,21 @@
     } catch (_) {}
   })();
 
-  // Keep the title page available so visitors can choose a season and episode first.
+  // Auto-open first watch group / first button into built-in watch page
   const firstBtn = document.querySelector('a.watch-btn[data-group-index="0"][data-button-index="0"]')
     || document.querySelector('a.watch-btn');
   if (firstBtn) {
+    const dest = firstBtn.getAttribute('href');
     const manual = document.getElementById('manualWatchLink');
-    if (manual) manual.setAttribute('href', firstBtn.getAttribute('href') || '#');
-    const banner = document.getElementById('autoOpenBanner');
-    if (banner) {
-      const spinner = banner.querySelector('.spinner');
-      if (spinner) spinner.style.display = 'none';
-      const strong = banner.querySelector('strong');
-      if (strong) strong.textContent = 'Ready when you are';
-      const hint = banner.querySelector('.muted');
-      if (hint) hint.textContent = 'Choose a season, episode or quality to start watching';
-      if (manual) manual.textContent = 'Play first episode';
+    if (manual) manual.setAttribute('href', dest);
+    // Skip auto-redirect if user already chose a quality (?stay=1) or came from back
+    const params = new URLSearchParams(window.location.search);
+    const skip = params.get('stay') === '1' || params.get('noredir') === '1';
+    if (!skip && dest) {
+      window.location.replace(dest);
+    } else {
+      const banner = document.getElementById('autoOpenBanner');
+      if (banner) banner.style.display = 'none';
     }
   }
 
@@ -290,87 +277,62 @@
     var selector=document.getElementById('seasonSelector');
     if(!list||!selector) return;
     var blocks=Array.prototype.slice.call(list.querySelectorAll('.group-block'));
-    var episodeItems=[], seasonContainers=[], unclassified=[];
+    var parsed=[];
+    var nonEpisode=[];
     function parseEpisode(name){
       name=String(name||'').trim();
       var m=name.match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
         || name.match(/\bSeason\s*0*(\d{1,3})\s*(?:[-_. ]*)?(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
         || name.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i)
         || name.match(/\bSeason\s*0*(\d{1,3})\b.*?\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i);
-      return m ? {season:Number(m[1]),episode:Number(m[2])} : null;
-    }
-    function parseSeasonOnly(name){
-      var m=String(name||'').trim().match(/^(?:season|s)\s*0*(\d{1,3})(?:\s*(?:[-–—:]|·)\s*.*)?$/i);
-      return m ? Number(m[1]) : null;
+      if(!m) return null;
+      return {season:Number(m[1]),episode:Number(m[2])};
     }
     blocks.forEach(function(block){
       var name=block.getAttribute('data-group-name')||block.querySelector('h3')?.textContent||'';
-      var seasonOnly=parseSeasonOnly(name);
       var ep=parseEpisode(name);
-      if(seasonOnly!==null){
-        block.dataset.season=String(seasonOnly);
-        seasonContainers.push({block:block,season:seasonOnly});
-      } else if(ep && Number.isFinite(ep.season) && Number.isFinite(ep.episode)){
+      if(ep && Number.isFinite(ep.season) && Number.isFinite(ep.episode)){
         block.dataset.season=String(ep.season); block.dataset.episode=String(ep.episode);
-        episodeItems.push({block:block,season:ep.season,episode:ep.episode,name:name});
-      } else {
-        // Also accept season metadata embedded in the group label, e.g. "Season 2 · Episodes".
-        var sm=String(name).match(/\b(?:season|s)\s*0*(\d{1,3})\b/i);
-        if(sm && /episode|ep|quality|links/i.test(name)){
-          block.dataset.season=String(Number(sm[1]));
-          seasonContainers.push({block:block,season:Number(sm[1])});
-        } else unclassified.push(block);
-      }
+        parsed.push({block:block,season:ep.season,episode:ep.episode,name:name});
+      } else nonEpisode.push(block);
     });
-    if(!episodeItems.length && !seasonContainers.length) return;
-
-    // Merge duplicate episode groups while preserving every distinct quality/source link.
-    episodeItems.sort(function(a,b){return a.season-b.season || a.episode-b.episode;});
+    if(!parsed.length) return;
+    parsed.sort(function(a,b){return a.season-b.season || a.episode-b.episode;});
+    // Combine duplicate season/episode groups into one episode card, retaining all unique links.
     var merged=[];
-    episodeItems.forEach(function(item){
+    parsed.forEach(function(item){
       var key=item.season+'-'+item.episode;
       var existing=merged.find(function(x){return x.key===key;});
-      if(!existing){merged.push({key:key,season:item.season,episode:item.episode,block:item.block});return;}
-      var target=existing.block.querySelector('.tools'), source=item.block.querySelector('.tools');
-      if(target&&source) Array.prototype.slice.call(source.querySelectorAll('a')).forEach(function(a){
-        var raw=a.getAttribute('data-raw-url')||a.getAttribute('href')||'';
-        var duplicate=Array.prototype.some.call(target.querySelectorAll('a'),function(old){
-          return (old.getAttribute('data-raw-url')||old.getAttribute('href')||'')===raw;
+      if(!existing){existing={key:key,season:item.season,episode:item.episode,block:item.block};merged.push(existing);return;}
+      var target=existing.block.querySelector('.tools');
+      var source=item.block.querySelector('.tools');
+      if(target&&source){
+        Array.prototype.slice.call(source.querySelectorAll('a')).forEach(function(a){
+          var raw=a.getAttribute('data-raw-url')||a.getAttribute('href')||'';
+          var duplicate=Array.prototype.some.call(target.querySelectorAll('a'),function(old){return (old.getAttribute('data-raw-url')||old.getAttribute('href')||'')===raw;});
+          if(!duplicate) target.appendChild(a);
         });
-        if(!duplicate) target.appendChild(a);
-      });
+      }
       item.block.remove();
     });
-
-    var seasonNumbers=Array.from(new Set(
-      merged.map(function(x){return x.season;}).concat(seasonContainers.map(function(x){return x.season;}))
-    )).sort(function(a,b){return a-b;});
-    if(!seasonNumbers.length) return;
-
+    // Preserve all links in their original order; do not detect or infer quality.
+    var seasonNumbers=Array.from(new Set(merged.map(function(x){return x.season;}))).sort(function(a,b){return a-b;});
     selector.hidden=false;
-    selector.innerHTML='';
     var watchPager=document.querySelector('.groups-pager[data-box="watch"]');
     if(watchPager) watchPager.style.display='none';
     var selected=seasonNumbers[0];
     seasonNumbers.forEach(function(season){
-      var epCount=merged.filter(function(x){return x.season===season;}).length;
-      var hasSeasonContainer=seasonContainers.some(function(x){return x.season===season;});
-      var button=document.createElement('button');
-      button.type='button'; button.dataset.season=String(season);
-      button.innerHTML='<span class="season-icon" aria-hidden="true">✦</span> Season '+season+
-        (epCount ? ' <span class="season-count">('+epCount+' episodes)</span>' : (hasSeasonContainer ? '' : ''));
+      var count=merged.filter(function(x){return x.season===season;}).length;
+      var button=document.createElement('button'); button.type='button'; button.dataset.season=String(season);
+      button.innerHTML='Season '+season+' <span class="season-count">('+count+' episodes)</span>';
       button.addEventListener('click',function(){selected=season;render();});
       selector.appendChild(button);
     });
     function render(){
-      selector.querySelectorAll('button').forEach(function(b){
-        b.classList.toggle('active',Number(b.dataset.season)===selected);
-        b.setAttribute('aria-pressed',Number(b.dataset.season)===selected?'true':'false');
-      });
-      unclassified.forEach(function(block){block.style.display='';});
-      seasonContainers.forEach(function(item){item.block.style.display=item.season===selected?'':'none';});
+      selector.querySelectorAll('button').forEach(function(b){b.classList.toggle('active',Number(b.dataset.season)===selected);});
+      nonEpisode.forEach(function(block){block.style.display='';});
       merged.forEach(function(item){item.block.style.display=item.season===selected?'':'none';});
-      // Keep episode groups in ascending order; season-level containers remain intact.
+      // DOM order is always season/episode ascending, independent of admin input order.
       merged.forEach(function(item){list.appendChild(item.block);});
     }
     render();

@@ -3,33 +3,6 @@
 {% block nav_home %}active{% endblock %}
 {% block content %}
 <style>#catalog-pagination[hidden]{display:none!important}#catalog-pagination button{background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:700}#catalog-pagination button:disabled{opacity:.4;cursor:not-allowed}#catalog-pagination button.active{background:linear-gradient(125deg,var(--accent),var(--accent-2));color:#180b02;border-color:transparent}</style>
-
-<style>
-/* Cinematic home refresh inspired by the supplied reference */
-.home-cinema{margin:18px 0 30px;min-height:clamp(340px,45vw,540px);border-radius:26px;border:1px solid rgba(228,189,130,.17);background:#09090b;box-shadow:0 30px 90px rgba(0,0,0,.56)}
-.home-cinema .backdrop-img{filter:saturate(.9) contrast(1.04);transform:scale(1.02)}
-.home-cinema .backdrop-scrim{background:linear-gradient(90deg,rgba(4,4,6,.94) 0%,rgba(4,4,6,.68) 46%,rgba(4,4,6,.08) 100%),linear-gradient(0deg,rgba(4,4,6,.72),transparent 58%)}
-.home-cinema .backdrop-content{padding:clamp(24px,5vw,58px)}
-.home-cinema .hero-eyebrow{font-size:11px;letter-spacing:.28em!important;font-weight:900;color:#e4bd82!important}
-.home-cinema #homeHeroTitle{font-family:"Space Grotesk","Manrope",sans-serif;font-weight:900;letter-spacing:-.045em;line-height:1.04}
-.home-cinema #homeHeroOverview{color:#d0cbd2;max-width:56ch;font-size:clamp(13px,1.3vw,16px)}
-#homeHeroActions .pill{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#eee}
-#homeHeroActions .btn-yellow{background:linear-gradient(120deg,#e8d9ff,#d8b77e)!important;color:#17151b!important;border:0!important;font-weight:900}
-.search-bar{background:rgba(18,18,21,.9);border:1px solid rgba(228,189,130,.15);border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,.2)}
-.section-head h2{font-family:"Space Grotesk",sans-serif;font-weight:900;letter-spacing:-.025em}
-#trending-row{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:16px;margin:16px 0 30px}
-#trending-row .trending-item{border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.09);background:#111;box-shadow:0 12px 28px rgba(0,0,0,.24);transition:transform .22s,border-color .22s}
-#trending-row .trending-item:hover{transform:translateY(-5px);border-color:rgba(228,189,130,.45)}
-#trending-row img{width:100%;aspect-ratio:2/3;object-fit:cover}
-.poster-grid{gap:18px}
-.poster-card{border-radius:17px;overflow:hidden;background:linear-gradient(160deg,#17171b,#0e0e11);border:1px solid rgba(255,255,255,.075);box-shadow:0 12px 30px rgba(0,0,0,.2);transition:transform .22s,border-color .22s,box-shadow .22s}
-.poster-card:hover{transform:translateY(-5px);border-color:rgba(228,189,130,.35);box-shadow:0 20px 44px rgba(0,0,0,.38)}
-.poster-card>img{aspect-ratio:2/3;object-fit:cover}
-.poster-card .info{padding:12px}
-.poster-card .title{font-weight:850;letter-spacing:-.015em}
-@media(max-width:600px){.home-cinema{min-height:360px;border-radius:19px}.home-cinema .backdrop-scrim{background:linear-gradient(0deg,rgba(4,4,6,.96),rgba(4,4,6,.14) 100%)}#trending-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.poster-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}}
-</style>
-
 <style>
 .home-cinema{position:relative;margin:22px 0 28px;min-height:clamp(300px,42vw,500px);border:1px solid rgba(255,255,255,.09);border-radius:24px;overflow:hidden;background:#101116;box-shadow:0 28px 80px rgba(0,0,0,.48)}
 .home-cinema .backdrop-img{filter:saturate(.86);transform:scale(1.015)}

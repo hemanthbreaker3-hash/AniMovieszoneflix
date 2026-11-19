@@ -563,22 +563,19 @@ function sendUnauthorized(res) {
   res.end(JSON.stringify({ detail: 'Invalid panel username or password' }));
 }
 
-function renderBaseLayout({ title, headExtra = '', content = '' }) {
-  const branding = String(process.env.BRANDING || 'AniMoviesZoneflix').trim() || 'AniMoviesZoneflix';
-  const logoUrl = String(process.env.LOGO_URL || '/static/images/logo.jpg').trim() || '/static/images/logo.jpg';
-  const pageTitle = title || branding;
+function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content = '' }) {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0c">
-  <meta name="description" content="${escapeHtml(branding)} — discover anime, movies and series.">
+  <meta name="description" content="AniMoviesZoneflix — discover anime, movies and series.">
   <meta name="color-scheme" content="dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-  <title>${escapeHtml(pageTitle)}</title>
+  <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     :root{
@@ -695,7 +692,7 @@ function renderBaseLayout({ title, headExtra = '', content = '' }) {
     body{background:radial-gradient(ellipse 75% 38% at 5% -8%,rgba(139,92,246,.16),transparent 62%),radial-gradient(ellipse 65% 42% at 100% 5%,rgba(111,48,151,.13),transparent 60%),linear-gradient(180deg,#09090d,#0b0a10 52%,#09090d)}
     .topbar{border-bottom-color:rgba(139,92,246,.18)}
     .topbar-logo img{display:block;object-fit:contain;background:#0a0a0c}
-    .brand-word{font-family:var(--font-display);font-weight:900;letter-spacing:.22em;background:linear-gradient(100deg,#fff 8%,#c4b5fd 43%,#8b5cf6 83%,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .brand-word{font-family:var(--font-display);font-weight:900;letter-spacing:-.055em;background:linear-gradient(100deg,#fff 8%,#c4b5fd 43%,#8b5cf6 83%,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
     .brand-mark span{background:linear-gradient(180deg,#22d3ee,#7c3aed);-webkit-background-clip:text;background-clip:text}
     .brand-mark::before{border-left-color:#8b5cf6;border-right-color:rgba(255,155,66,.75)}
     .topbar-links a:hover{background:rgba(139,92,246,.08);border-color:rgba(139,92,246,.28)}
@@ -710,30 +707,17 @@ function renderBaseLayout({ title, headExtra = '', content = '' }) {
     .chip:hover,.chip.active{color:#ffad70;border-color:rgba(139,92,246,.55);background:rgba(139,92,246,.16)}
     .footer{border-top-color:rgba(139,92,246,.16)}
     @media(max-width:640px){.page-hero{padding:22px 18px;min-height:135px}.brand-mark{display:grid;width:25px}}
-    .home-cinema{position:relative;isolation:isolate;overflow:hidden;min-height:clamp(320px,42vw,510px);margin:20px 0 26px;border:1px solid rgba(228,189,130,.17);border-radius:24px;background:#09090b;box-shadow:0 28px 80px rgba(0,0,0,.5)}
-    .home-cinema-backdrop{position:absolute;inset:0;z-index:-2;background:#111 center 35%/cover no-repeat;transform:scale(1.02);filter:saturate(.88)}
-    .home-cinema-shade{position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,rgba(4,4,6,.96),rgba(4,4,6,.68) 48%,rgba(4,4,6,.08)),linear-gradient(0deg,rgba(4,4,6,.72),transparent 60%)}
-    .home-cinema-content{display:flex;min-height:inherit;max-width:720px;flex-direction:column;justify-content:flex-end;padding:clamp(24px,5vw,58px)}
-    .home-cinema-kicker{font-size:10px;font-weight:900;letter-spacing:.28em;color:#e4bd82;margin-bottom:12px}
-    .home-cinema h1{font-size:clamp(2rem,5.4vw,4.1rem);line-height:1.02;letter-spacing:-.045em;background:linear-gradient(100deg,#fff 10%,#e6d9ff 65%,#e4bd82);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:12px}
-    .home-cinema p{color:#d0cbd2;max-width:58ch;font-size:clamp(13px,1.3vw,16px);margin-bottom:18px}
-    .home-cinema-cta{display:inline-flex;align-items:center;gap:12px;align-self:flex-start;padding:11px 18px;border-radius:999px;background:linear-gradient(120deg,#e8d9ff,#d8b77e);color:#17151b;font-weight:900;font-size:13px}
-    .trending-row{display:flex;gap:14px;overflow-x:auto;padding:6px 0 16px;scroll-snap-type:x mandatory}
-    .trending-item{flex:0 0 148px;border-radius:15px;overflow:hidden;border:1px solid rgba(255,255,255,.09);background:#111;scroll-snap-align:start}
-    .trending-item img{width:100%;aspect-ratio:2/3;object-fit:cover}
-    .poster-grid{gap:17px}.poster-card{border-radius:16px}
-    @media(max-width:640px){.home-cinema{min-height:350px;border-radius:18px}.home-cinema-shade{background:linear-gradient(0deg,rgba(4,4,6,.97),rgba(4,4,6,.14))}.home-cinema-content{padding:22px}.trending-item{flex-basis:112px}}
   </style>
   ${headExtra}
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="topbar-logo" href="/" title="${escapeHtml(branding)} Home">
-      <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(branding)}" width="42" height="42" loading="eager" onerror="this.style.display='none'">
+    <a class="topbar-logo" href="/" title="AniMoviesZoneflix Home">
+      <img src="/static/images/logo.jpg" alt="AniMoviesZoneflix" width="42" height="42" loading="eager" onerror="this.style.display='none'">
       <span class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"><span>AZF</span></span>
-        <span class="brand-word">${escapeHtml(branding)}</span>
+        <span class="brand-word">AniMoviesZoneflix</span>
       </span>
     </a>
     <nav class="topbar-links" aria-label="Primary">
@@ -745,7 +729,7 @@ function renderBaseLayout({ title, headExtra = '', content = '' }) {
   </div>
 </header>
 <main class="wrap fade-up">${content}</main>
-<footer class="footer wrap"><strong>${escapeHtml(branding)}</strong> · Stream &amp; download with speed and clarity</footer>
+<footer class="footer wrap"><strong>AniMoviesZoneflix</strong> · Stream &amp; download with speed and clarity</footer>
 </body>
 </html>`;
 }
@@ -757,16 +741,12 @@ function pagePosterPath(p) {
 
 function renderIndexHtml(initialItems, initialCategories, queryStr = '') {
   const content = `
-<section class="home-cinema" id="homeCinema">
-  <div class="home-cinema-backdrop" id="homeCinemaBackdrop"></div>
-  <div class="home-cinema-shade"></div>
-  <div class="home-cinema-content">
-    <div class="home-cinema-kicker">✦ FEATURED COLLECTION</div>
-    <h1 id="homeCinemaTitle">Discover your next favourite</h1>
-    <p id="homeCinemaOverview">Explore standout anime, movies and series in one cinematic destination.</p>
-    <a class="home-cinema-cta" id="homeCinemaLink" href="/search">Explore titles <span aria-hidden="true">↗</span></a>
+<div class="page-hero">
+  <div>
+    <h1>Discover media</h1>
+    <p>Browse the catalog, open a title, then stream or get files in Telegram.</p>
   </div>
-</section>
+</div>
 <div id="trending-row" class="trending-row" style="display:none"></div>
 
 <form class="search-bar" action="/search" method="get">
@@ -865,21 +845,6 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
     }
 
     if (!q && list.length) {
-      const featured = list.find(x => x && x.backdrop_path) || list[0];
-      const hero = document.getElementById('homeCinema');
-      const heroTitle = document.getElementById('homeCinemaTitle');
-      const heroOverview = document.getElementById('homeCinemaOverview');
-      const heroBackdrop = document.getElementById('homeCinemaBackdrop');
-      const heroLink = document.getElementById('homeCinemaLink');
-      if (featured && hero) {
-        const backdrop = featured.backdrop_path
-          ? (String(featured.backdrop_path).startsWith('http') ? featured.backdrop_path : 'https://image.tmdb.org/t/p/original' + featured.backdrop_path)
-          : (featured.poster_path || '');
-        if (heroBackdrop && backdrop) heroBackdrop.style.backgroundImage = 'url("' + backdrop.replace(/"/g, '%22') + '")';
-        if (heroTitle) heroTitle.textContent = featured.title || 'Discover your next favourite';
-        if (heroOverview) heroOverview.textContent = featured.overview || 'Explore standout anime, movies and series in one cinematic destination.';
-        if (heroLink) heroLink.href = '/title/' + encodeURIComponent(featured.slug || '');
-      }
       trend.style.display = 'flex';
       trend.innerHTML = '';
       list.slice(0, 10).forEach(p => {
@@ -1190,10 +1155,6 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
     @keyframes title-spin{to{transform:rotate(360deg)}}
     .auto-open-banner a{color:#22d3ee;font-weight:700}
     @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}}
-    .season-selector{display:flex;flex-wrap:wrap;gap:9px;margin:0 0 14px;padding:12px;border:1px solid rgba(228,189,130,.16);border-radius:16px;background:rgba(8,9,13,.78)}
-    .season-selector button{border:1px solid rgba(255,255,255,.1);background:#17171b;color:#d7d3dc;border-radius:999px;padding:9px 15px;font-size:12px;font-weight:850;cursor:pointer}
-    .season-selector button.active{background:linear-gradient(120deg,#e8d9ff,#d8b77e);color:#17151b;border-color:transparent}
-    .season-selector .season-count{font-size:10px;opacity:.75;margin-left:4px}
   </style>`;
 
   const poster = pagePosterPath(page.poster_path);
@@ -1242,7 +1203,6 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
 
       return `<section class="link-box ${boxKey}" aria-label="${escapeHtml(boxTitle)} links" data-box="${boxKey}">
         <h2><span aria-hidden="true">${boxIcon}</span>${escapeHtml(boxTitle)}</h2>
-        ${boxKey === 'watch' ? '<div class="season-selector" id="seasonSelector" hidden aria-label="Available seasons"></div>' : ''}
         <div class="groups-list" data-box="${boxKey}">${groupsContent}</div>
         ${pagerHtml}
       </section>`;
@@ -1382,79 +1342,21 @@ function renderTitleHtml(page, cloudflareUrl, filestoreUsername = "") {
       }
     } catch (_) {}
   })();
-  // Keep the title page available so visitors can choose a season and episode first.
   const firstBtn = document.querySelector('a.watch-btn[data-group-index="0"][data-button-index="0"]')
     || document.querySelector('a.watch-btn');
   if (firstBtn) {
+    const dest = firstBtn.getAttribute('href');
     const manual = document.getElementById('manualWatchLink');
-    if (manual) manual.setAttribute('href', firstBtn.getAttribute('href') || '#');
-    const banner = document.getElementById('autoOpenBanner');
-    if (banner) {
-      const spinner = banner.querySelector('.spinner');
-      if (spinner) spinner.style.display = 'none';
-      const strong = banner.querySelector('strong');
-      if (strong) strong.textContent = 'Ready when you are';
-      const hint = banner.querySelector('.muted');
-      if (hint) hint.textContent = 'Choose a season, episode or quality to start watching';
-      if (manual) manual.textContent = 'Play first episode';
+    if (manual) manual.setAttribute('href', dest);
+    const params = new URLSearchParams(window.location.search);
+    const skip = params.get('stay') === '1' || params.get('noredir') === '1';
+    if (!skip && dest) {
+      setTimeout(function(){ window.location.replace(dest); }, 350);
+    } else {
+      const banner = document.getElementById('autoOpenBanner');
+      if (banner) banner.style.display = 'none';
     }
   }
-  (function setupSeasonNavigation(){
-    var list=document.querySelector('.groups-list[data-box="watch"]');
-    var selector=document.getElementById('seasonSelector');
-    if(!list||!selector) return;
-    var blocks=Array.from(list.querySelectorAll('.group-block'));
-    var episodes=[], containers=[], other=[];
-    function episode(name){
-      var m=String(name||'').match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
-        || String(name||'').match(/\bSeason\s*0*(\d{1,3})\s*(?:[-_. ]*)?(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
-        || String(name||'').match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
-      return m?{season:+m[1],episode:+m[2]}:null;
-    }
-    function seasonOnly(name){
-      var m=String(name||'').trim().match(/^(?:season|s)\s*0*(\d{1,3})(?:\s*(?:[-–—:]|·)\s*.*)?$/i);
-      return m?+m[1]:null;
-    }
-    blocks.forEach(function(block){
-      var name=block.querySelector('h3')?.textContent||'';
-      var sn=seasonOnly(name), ep=episode(name);
-      if(sn!==null){containers.push({block:block,season:sn});}
-      else if(ep){episodes.push({block:block,season:ep.season,episode:ep.episode});}
-      else other.push(block);
-    });
-    if(!episodes.length&&!containers.length)return;
-    episodes.sort(function(x,y){return x.season-y.season||x.episode-y.episode;});
-    var merged=[];
-    episodes.forEach(function(item){
-      var old=merged.find(function(x){return x.season===item.season&&x.episode===item.episode;});
-      if(!old){merged.push(item);return;}
-      var target=old.block.querySelector('.tools'),source=item.block.querySelector('.tools');
-      if(target&&source)Array.from(source.querySelectorAll('a')).forEach(function(link){
-        var href=link.getAttribute('data-raw-url')||link.getAttribute('href');
-        if(!Array.from(target.querySelectorAll('a')).some(function(x){return (x.getAttribute('data-raw-url')||x.getAttribute('href'))===href;}))target.appendChild(link);
-      });
-      item.block.remove();
-    });
-    var seasons=Array.from(new Set(merged.map(x=>x.season).concat(containers.map(x=>x.season)))).sort((x,y)=>x-y);
-    if(!seasons.length)return;
-    selector.hidden=false;selector.innerHTML='';
-    var pager=document.querySelector('.groups-pager[data-box="watch"]');if(pager)pager.style.display='none';
-    var selected=seasons[0];
-    seasons.forEach(function(n){
-      var count=merged.filter(x=>x.season===n).length;
-      var b=document.createElement('button');b.type='button';b.dataset.season=String(n);
-      b.innerHTML='✦ Season '+n+(count?' <span class="season-count">('+count+' episodes)</span>':'');
-      b.addEventListener('click',function(){selected=n;render();});selector.appendChild(b);
-    });
-    function render(){
-      selector.querySelectorAll('button').forEach(function(b){b.classList.toggle('active',+b.dataset.season===selected);});
-      other.forEach(x=>x.style.display='');
-      containers.forEach(x=>x.block.style.display=x.season===selected?'':'none');
-      merged.forEach(x=>x.block.style.display=x.season===selected?'':'none');
-      merged.forEach(x=>list.appendChild(x.block));
-    }
-    render();
-  })();
   var PER=5;
   function setupBox(boxKey){
     var list=document.querySelector('.groups-list[data-box="'+boxKey+'"]');
@@ -2319,7 +2221,7 @@ function renderWatchHtml(file, settings, streamBaseUrl, extra = {}) {
             subtitleedge="outline"
             style="display:none;width:100%;height:100%"
             tabindex="0"></movi-player>
-          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()" aria-label="Switch player" title="Switch player"><span aria-hidden="true">↗</span></button>
+          <button type="button" class="native-switch" id="nativeSwitch" hidden onclick="switchEngine()">Buffering? Switch to basic player</button>
           <video id="player" controls playsinline preload="auto" style="display:none;width:100%;height:100%;object-fit:contain;background:#000"></video>
           <div id="playerLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2">
             <div style="width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#8b5cf6;animation:ddspin .8s linear infinite"></div>
@@ -2704,87 +2606,62 @@ document.addEventListener('click', () => {
     if (card) card.style.display = 'none';
     return;
   }
-  // Derive seasons from real episode labels and season-group names.
-  // Supports one group per episode and one group per season containing episode buttons.
-  const parseSeason = value => {
-    const m = String(value || '').match(/(?:season\s*|\bs)(\d{1,3})\b/i);
-    return m ? Number(m[1]) : null;
+  const seasonOf = name => {
+    const text = String(name || '');
+    const m = text.match(/(?:season\s*|s\s*)(\d{1,2})\b/i) || text.match(/\bS(\d{1,2})E\d{1,3}\b/i);
+    return m ? 'Season ' + Number(m[1]) : 'Season 1';
   };
-  const parseEpisode = (value, fallbackSeason) => {
-    const text = String(value || '').trim();
-    let m = text.match(/\bS(?:eason\s*)?0*(\d{1,3})\s*[-_. ]*E(?:pisode\s*)?0*(\d{1,4})\b/i)
-      || text.match(/\bSeason\s*0*(\d{1,3})\s*[-_. ]*(?:Episode|Ep)\s*0*(\d{1,4})\b/i)
-      || text.match(/\b0*(\d{1,3})\s*[xX]\s*0*(\d{1,4})\b/i);
-    if (m) return { season:Number(m[1]), episode:Number(m[2]) };
-    m = text.match(/\b(?:Episode|Ep|E)\s*0*(\d{1,4})\b/i);
-    if (m) return { season:fallbackSeason || 1, episode:Number(m[1]) };
-    return null;
-  };
-  const rows = [];
-  WATCH_GROUPS.forEach((g, groupIdx) => {
-    const buttons = Array.isArray(g.buttons) ? g.buttons : [];
-    const groupSeason = parseSeason(g.name);
-    buttons.forEach((button, buttonIdx) => {
-      if (!button || !button.url) return;
-      const parsed = parseEpisode(button.name, groupSeason) || parseEpisode(g.name, groupSeason);
-      if (parsed) rows.push({ g, button, groupIdx, buttonIdx, parsed, label:String(button.name || g.name || ('Episode ' + parsed.episode)) });
-    });
+  const seasons = [...new Set(WATCH_GROUPS.map(g => seasonOf(g.name)))].sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
+  seasons.forEach(season => {
+    if (!seasonSelect) return;
+    const o = document.createElement('option');
+    o.value = season; o.textContent = season; seasonSelect.appendChild(o);
   });
-  rows.sort((a,b) => a.parsed.season-b.parsed.season || a.parsed.episode-b.parsed.episode || a.groupIdx-b.groupIdx || a.buttonIdx-b.buttonIdx);
-  const seasons = [...new Set(rows.map(row => row.parsed.season))].sort((a,b) => a-b);
-  if (!rows.length || !seasons.length) {
-    const card = document.getElementById('sideEpsCard');
-    if (card) card.style.display = 'none';
-    return;
-  }
-  if (seasonSelect) {
-    seasonSelect.innerHTML = '';
-    const allOption = document.createElement('option');
-    allOption.value = 'all'; allOption.textContent = 'All Seasons'; seasonSelect.appendChild(allOption);
-    seasons.forEach(season => {
-      const o = document.createElement('option');
-      o.value = String(season); o.textContent = 'Season ' + season; seasonSelect.appendChild(o);
-    });
-    seasonSelect.value = 'all';
-  }
-  let selected = 'all';
   function setActiveSeasonUI(value) {
-    selected = value;
-    if (seasonBar) seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
+    if (seasonBar) {
+      seasonBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.season === value));
+    }
     if (seasonSelect) seasonSelect.value = value;
   }
   if (seasonBar) {
-    seasonBar.innerHTML = '';
-    const addSeasonButton = (label, value) => {
+    const add = (label, value) => {
       const b = document.createElement('button');
       b.type = 'button'; b.textContent = label; b.dataset.season = value;
-      b.className = value === selected ? 'active' : '';
+      b.className = value === 'all' ? 'active' : '';
       b.onclick = () => { setActiveSeasonUI(value); render(); };
       seasonBar.appendChild(b);
     };
-    addSeasonButton('All Seasons', 'all');
-    seasons.forEach(season => addSeasonButton('Season ' + season, String(season)));
+    add('All', 'all');
+    seasons.forEach(s => add(s.replace(/^Season\s+/i, 'S'), s));
   }
   function filtered() {
     const term = (search && search.value || '').trim().toLowerCase();
-    return rows.filter(row => (selected === 'all' || String(row.parsed.season) === selected)
-      && (!term || row.label.toLowerCase().includes(term)));
+    const season = (seasonSelect && seasonSelect.value) || 'all';
+    return WATCH_GROUPS.map((g, idx) => ({ g, idx })).filter(({ g }) => {
+      const name = String(g.name || '');
+      return (season === 'all' || seasonOf(name) === season) && (!term || name.toLowerCase().includes(term));
+    });
   }
   function render() {
-    const visibleRows = filtered();
+    const rows = filtered();
     list.innerHTML = '';
-    visibleRows.forEach(row => {
-      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(row.groupIdx, row.buttonIdx) : null) || row.button.url;
+    rows.forEach(({ g, idx }) => {
+      const first = (g.buttons || [])[0];
+      if (!first) return;
+      const href = (typeof watchHrefFor === 'function' ? watchHrefFor(idx, 0) : null) || first.url;
       const a = document.createElement('a');
-      a.className = 'side-ep-btn' + (row.groupIdx === GROUP_INDEX && row.buttonIdx === BUTTON_INDEX ? ' active' : '');
+      a.className = 'side-ep-btn' + (idx === GROUP_INDEX ? ' active' : '');
       a.href = href;
       const tag = document.createElement('span');
-      tag.className = 'ep-tag'; tag.textContent = 'S' + String(row.parsed.season).padStart(2,'0') + ' · EP ' + String(row.parsed.episode).padStart(2,'0');
+      tag.className = 'ep-tag';
+      tag.textContent = 'EP ' + (idx + 1);
       const name = document.createElement('span');
-      name.className = 'ep-name'; name.textContent = row.label;
-      a.append(tag, name); list.appendChild(a);
+      name.className = 'ep-name';
+      name.textContent = g.name || ('Episode ' + (idx + 1));
+      a.append(tag, name);
+      list.appendChild(a);
     });
-    if (count) count.textContent = visibleRows.length + ' episode' + (visibleRows.length === 1 ? '' : 's');
+    if (count) count.textContent = rows.length + ' episode' + (rows.length === 1 ? '' : 's');
   }
   search && search.addEventListener('input', render);
   seasonSelect && seasonSelect.addEventListener('change', () => {
