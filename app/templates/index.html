@@ -48,13 +48,13 @@
   function posterUrl(p) {
     if (!p) return '/static/images/poster.jpg';
     if (String(p).startsWith('http')) return p;
-    return 'https://image.tmdb.org/t/p/w500' + p;
+    return 'https://image.tmdb.org/t/p/w780' + p;
   }
 
   function backdropUrl(p) {
     if (!p) return '';
     if (String(p).startsWith('http')) return p;
-    return 'https://image.tmdb.org/t/p/w1280' + p;
+    return 'https://image.tmdb.org/t/p/original' + p;
   }
 
   function applyHero(list) {
@@ -70,16 +70,29 @@
     if (heroOverview) heroOverview.textContent = pick.overview || 'Explore anime, movies and series. Pick a title to watch or get it in Telegram.';
     if (heroActions) {
       heroActions.innerHTML = '';
+      const meta = document.createElement('div');
+      meta.className = 'hero-meta';
+      const year = (pick.release_date || pick.first_air_date || '').toString().slice(0, 4);
+      if (year) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = year; meta.appendChild(pill); }
+      if (pick.rating != null && Number(pick.rating) > 0) {
+        const pill = document.createElement('span'); pill.className = 'pill gold';
+        pill.textContent = '★ ' + Number(pick.rating).toFixed(1); meta.appendChild(pill);
+      }
+      if (pick.media_type) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = String(pick.media_type).toUpperCase(); meta.appendChild(pill); }
+      if ((pick.genres || []).length) { const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = pick.genres.slice(0, 2).join(' · '); meta.appendChild(pill); }
+      heroActions.appendChild(meta);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap';
       const watchBtn = document.createElement('a');
       watchBtn.className = 'btn btn-yellow';
       watchBtn.href = '/title/' + encodeURIComponent(pick.slug);
-      watchBtn.textContent = '▶ Watch now';
+      watchBtn.textContent = '▶ Play';
       const infoBtn = document.createElement('a');
       infoBtn.className = 'btn';
       infoBtn.href = '/title/' + encodeURIComponent(pick.slug);
       infoBtn.textContent = 'More info';
-      heroActions.appendChild(watchBtn);
-      heroActions.appendChild(infoBtn);
+      row.appendChild(watchBtn); row.appendChild(infoBtn);
+      heroActions.appendChild(row);
     }
   }
 
@@ -91,18 +104,42 @@
     img.src = posterUrl(p.poster_path);
     img.alt = (p.title || 'Poster') + ' poster';
     img.loading = 'lazy';
+    img.decoding = 'async';
+    const badges = document.createElement('div');
+    badges.className = 'badge-row';
+    const rating = p.rating != null && p.rating !== '' ? Number(p.rating) : null;
+    if (rating != null && !Number.isNaN(rating) && rating > 0) {
+      const b = document.createElement('span');
+      b.className = 'badge badge-rating';
+      b.textContent = '★ ' + (rating % 1 ? rating.toFixed(1) : rating);
+      badges.appendChild(b);
+    }
+    const year = (p.release_date || p.first_air_date || '').toString().slice(0, 4);
+    if (year) {
+      const y = document.createElement('span');
+      y.className = 'badge badge-year';
+      y.textContent = year;
+      badges.appendChild(y);
+    }
+    const play = document.createElement('div');
+    play.className = 'play-hint';
+    play.innerHTML = '<span>▶</span>';
     const info = document.createElement('div');
     info.className = 'info';
-    const t = document.createElement('div');
-    t.className = 'title';
-    const year = (p.release_date || '').slice(0, 4);
-    t.textContent = (p.title || 'Untitled') + (year ? ' (' + year + ')' : '');
-    const m = document.createElement('div');
-    m.className = 'meta';
-    m.textContent = [p.media_type || '', p.rating != null ? '★ ' + p.rating : ''].filter(Boolean).join(' · ');
-    info.appendChild(t);
-    info.appendChild(m);
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = p.title || 'Untitled';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const parts = [];
+    if (p.media_type) parts.push(String(p.media_type).toUpperCase());
+    if (Array.isArray(p.genres) && p.genres.length) parts.push(p.genres.slice(0, 2).join(', '));
+    meta.textContent = parts.join(' · ');
+    info.appendChild(title);
+    info.appendChild(meta);
     a.appendChild(img);
+    a.appendChild(badges);
+    a.appendChild(play);
     a.appendChild(info);
     return a;
   }

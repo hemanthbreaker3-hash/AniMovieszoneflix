@@ -572,20 +572,46 @@ async def create_page(data: PageInput, _: bool = Depends(admin_auth)):
     )
     if data.tmdb_id and settings.TMDB_API_KEY:
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=20) as client:
                 endpoint = 'tv' if data.media_type == 'tv' else 'movie'
                 detail = await client.get(
                     f'https://api.themoviedb.org/3/{endpoint}/{data.tmdb_id}',
-                    params={'api_key': settings.TMDB_API_KEY, 'append_to_response': 'external_ids'},
+                    params={
+                        'api_key': settings.TMDB_API_KEY,
+                        'append_to_response': 'external_ids,credits,images,content_ratings,release_dates',
+                        'language': 'en-US',
+                    },
                 )
                 detail.raise_for_status()
                 meta = detail.json()
             doc['genres'] = [g.get('name', '') for g in meta.get('genres', []) if g.get('name')]
             doc['imdb_id'] = (meta.get('external_ids') or {}).get('imdb_id') or meta.get('imdb_id', '')
             doc['runtime'] = meta.get('runtime') or (meta.get('episode_run_time') or [None])[0]
-            doc['tagline'] = meta.get('tagline', '')
+            doc['tagline'] = meta.get('tagline') or doc.get('tagline') or ''
+            if meta.get('vote_average') is not None:
+                doc['rating'] = round(float(meta['vote_average']), 1)
+            if meta.get('vote_count') is not None:
+                doc['vote_count'] = int(meta['vote_count'])
+            if not doc.get('overview') and meta.get('overview'):
+                doc['overview'] = meta.get('overview')
+            if not doc.get('poster_path') and meta.get('poster_path'):
+                doc['poster_path'] = meta['poster_path']
             if not doc.get('backdrop_path') and meta.get('backdrop_path'):
-                doc['backdrop_path'] = meta.get('backdrop_path')
+                doc['backdrop_path'] = meta['backdrop_path']
+            if not doc.get('release_date'):
+                doc['release_date'] = meta.get('release_date') or meta.get('first_air_date') or ''
+            # Top cast (up to 8) for title page UI
+            cast = (meta.get('credits') or {}).get('cast') or []
+            if cast:
+                doc['cast'] = [
+                    {
+                        'name': c.get('name') or '',
+                        'character': c.get('character') or '',
+                        'profile_path': c.get('profile_path') or '',
+                    }
+                    for c in cast[:8]
+                    if c.get('name')
+                ]
         except Exception:
             pass
     doc['updated_at'] = doc['created_at']

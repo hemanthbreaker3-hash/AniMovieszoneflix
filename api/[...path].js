@@ -580,19 +580,19 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
   <style>
     :root{
       color-scheme:dark;
-      --bg:#09090d;--bg-elevated:#111116;--bg-card:#17171e;--bg-card-hover:#22212a;
-      --line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.14);
-      --text:#fffaf7;--muted:#a5a1ad;--accent:#8b5cf6;--accent-2:#22d3ee;
-      --accent-soft:rgba(139,92,246,.16);--cyan:#ff8a28;--danger:#ff5c5c;
-      --radius:14px;--radius-sm:10px;--shadow:0 18px 50px rgba(0,0,0,.45);
+      --bg:#0a0a0c;--bg-elevated:#121214;--bg-card:#16161a;--bg-card-hover:#1e1e24;
+      --line:rgba(255,255,255,.06);--line-strong:rgba(255,255,255,.12);
+      --text:#f5f5f7;--muted:#8e8e98;--accent:#a78bfa;--accent-2:#22d3ee;
+      --accent-soft:rgba(167,139,250,.14);--cyan:#22d3ee;--prime:#f5c518;--danger:#ff5c5c;
+      --radius:12px;--radius-sm:8px;--shadow:0 24px 60px rgba(0,0,0,.55);
       --font:"Outfit",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      --font-display:"Syne","Outfit",system-ui,sans-serif;--max:1160px;
+      --font-display:"Syne","Outfit",system-ui,sans-serif;--max:1400px;--pad:4vw;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
     body{margin:0;min-height:100vh;color:var(--text);font:500 15px/1.55 var(--font);
-      background:radial-gradient(ellipse 80% 50% at 10% -10%,rgba(139,92,246,.16),transparent 50%),
-        radial-gradient(ellipse 60% 40% at 90% 0%,rgba(111,48,151,.13),transparent 45%),var(--bg);
+      background:radial-gradient(ellipse 80% 50% at 15% -15%,rgba(167,139,250,.12),transparent 55%),
+        radial-gradient(ellipse 50% 40% at 90% 10%,rgba(34,211,238,.06),transparent 50%),var(--bg);
       letter-spacing:.01em;-webkit-font-smoothing:antialiased}
     h1,h2,h3,h4,.brand-word{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em}
     a{color:inherit;text-decoration:none} button,input,select{font:inherit} img{max-width:100%;display:block}
@@ -642,6 +642,19 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
       transition:border-color .15s,color .15s,background .15s}
     .chip:hover,.chip.active{color:var(--accent);border-color:rgba(255,106,0,.5);background:var(--accent-soft)}
     .cat-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    
+    .poster-card .badge-row{position:absolute;top:8px;left:8px;right:8px;display:flex;justify-content:space-between;gap:6px;z-index:2;pointer-events:none}
+    .poster-card .badge{font-size:10px;font-weight:800;padding:4px 8px;border-radius:6px;backdrop-filter:blur(8px)}
+    .poster-card .badge-rating{background:rgba(0,0,0,.72);color:var(--prime);border:1px solid rgba(245,197,24,.25)}
+    .poster-card .badge-year{background:rgba(0,0,0,.55);color:#e5e7eb;border:1px solid rgba(255,255,255,.1);margin-left:auto}
+    .poster-card .play-hint{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.35);opacity:0;transition:opacity .25s;z-index:1}
+    .poster-card:hover .play-hint{opacity:1}
+    .poster-card .play-hint span{width:48px;height:48px;border-radius:50%;background:rgba(167,139,250,.95);display:grid;place-items:center;color:#0a0a0c;font-size:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+    .hero-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+    .hero-meta .pill{font-size:11px;font-weight:800;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#e5e7eb}
+    .hero-meta .pill.gold{color:var(--prime);border-color:rgba(245,197,24,.35);background:rgba(245,197,24,.1)}
+    .poster-card{position:relative}
+
     .poster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:16px;margin-top:8px}
     .poster-card{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
       transition:transform .22s cubic-bezier(.2,.8,.2,1),border-color .2s,box-shadow .22s}
@@ -723,7 +736,7 @@ function renderBaseLayout({ title = 'AniMoviesZoneflix', headExtra = '', content
 
 function pagePosterPath(p) {
   if (!p) return '/static/images/poster.jpg';
-  return String(p).startsWith('http') ? p : `https://image.tmdb.org/t/p/w500${p}`;
+  return String(p).startsWith('http') ? p : `https://image.tmdb.org/t/p/w780${p}`;
 }
 
 function renderIndexHtml(initialItems, initialCategories, queryStr = '') {
@@ -861,18 +874,31 @@ window.__INITIAL_CATEGORIES__ = ${safeJsonForScript(initialCategories)};
       a.href = '/title/' + encodeURIComponent(p.slug);
       const img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = p.poster_path?.startsWith('http') ? p.poster_path : (p.poster_path ? 'https://image.tmdb.org/t/p/w500' + p.poster_path : '/static/images/poster.jpg');
+      img.decoding = 'async';
+      img.src = p.poster_path?.startsWith('http') ? p.poster_path : (p.poster_path ? 'https://image.tmdb.org/t/p/w780' + p.poster_path : '/static/images/poster.jpg');
       img.alt = p.title || 'Poster';
+      const badges = document.createElement('div');
+      badges.className = 'badge-row';
+      const rating = p.rating != null && p.rating !== '' ? Number(p.rating) : null;
+      if (rating != null && !Number.isNaN(rating) && rating > 0) {
+        const b = document.createElement('span'); b.className = 'badge badge-rating';
+        b.textContent = '★ ' + (rating % 1 ? rating.toFixed(1) : rating); badges.appendChild(b);
+      }
+      const year = (p.release_date || '').toString().slice(0, 4);
+      if (year) {
+        const y = document.createElement('span'); y.className = 'badge badge-year'; y.textContent = year; badges.appendChild(y);
+      }
+      const play = document.createElement('div'); play.className = 'play-hint'; play.innerHTML = '<span>▶</span>';
       const info = document.createElement('div');
       info.className = 'info';
       const t = document.createElement('div');
       t.className = 'title';
-      t.textContent = (p.title || 'Untitled') + (p.release_date ? ' (' + (p.release_date.slice(0, 4) || '') + ')' : '');
+      t.textContent = p.title || 'Untitled';
       const m = document.createElement('div');
       m.className = 'meta';
       m.textContent = qualityLine(p);
       info.append(t, m);
-      a.append(img, info);
+      a.append(img, badges, play, info);
       el.append(a);
       }
       if (pager) {
