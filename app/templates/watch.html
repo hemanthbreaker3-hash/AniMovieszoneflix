@@ -313,6 +313,37 @@
     {% set _poster = 'https://image.tmdb.org/t/p/w500' + title_page.poster_path %}
   {% endif %}
 {% endif %}
+{% set _backdrop_thumb = '' %}
+{% if title_page is defined and title_page and title_page.backdrop_path %}
+  {% if title_page.backdrop_path.startswith('http') %}
+    {% set _backdrop_thumb = title_page.backdrop_path %}
+  {% else %}
+    {% set _backdrop_thumb = 'https://image.tmdb.org/t/p/w780' + title_page.backdrop_path %}
+  {% endif %}
+{% endif %}
+{% set _backdrop_hero = '' %}
+{% if title_page is defined and title_page and title_page.backdrop_path %}
+  {% if title_page.backdrop_path.startswith('http') %}
+    {% set _backdrop_hero = title_page.backdrop_path %}
+  {% else %}
+    {% set _backdrop_hero = 'https://image.tmdb.org/t/p/w1280' + title_page.backdrop_path %}
+  {% endif %}
+{% endif %}
+
+{% if _backdrop_hero or title_page %}
+<section class="backdrop-hero" style="min-height:clamp(160px,30vw,300px);margin-bottom:16px">
+  {% if _backdrop_hero %}<div class="backdrop-img" style="background-image:url('{{ _backdrop_hero }}')"></div>{% endif %}
+  <div class="backdrop-scrim"></div>
+  <div class="backdrop-content">
+    {% if title_page %}
+    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px;font-family:var(--font-display)">AniMoviesZoneflix · Now Playing</div>
+    <h1 style="font-size:clamp(1.2rem,3.4vw,1.9rem);margin:0;line-height:1.15">{{ title_page.title }}</h1>
+    {% else %}
+    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-family:var(--font-display)">AniMoviesZoneflix · Now Playing</div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
 
 <div class="watch-grid">
   <section>
@@ -571,6 +602,8 @@ const TITLE_SLUG = {{ (_slug if _slug is defined else '')|tojson }};
 const GROUP_INDEX = {{ (_gi if _gi is defined else 0)|tojson }};
 const BUTTON_INDEX = {{ (_bi if _bi is defined else 0)|tojson }};
 const POSTER_URL = {{ (_poster if _poster is defined else '')|tojson }};
+const BACKDROP_THUMB_URL = {{ (_backdrop_thumb if _backdrop_thumb is defined else '')|tojson }};
+const THUMB_URL = BACKDROP_THUMB_URL || POSTER_URL;
 const FILESTORE_USER = {{ (_fs if _fs is defined else '')|tojson }};
 
 function extractWatchCode(url) {
@@ -721,7 +754,7 @@ document.addEventListener('click', () => {
       card.href = href;
       const thumb = document.createElement('div');
       thumb.className = 'thumb';
-      if (POSTER_URL) thumb.style.backgroundImage = 'url("' + String(POSTER_URL).replace(/"/g, '\\"') + '")';
+      if (THUMB_URL) thumb.style.backgroundImage = 'url("' + String(THUMB_URL).replace(/"/g, '\\"') + '")';
       else thumb.style.background = '#111';
       const meta = document.createElement('div');
       meta.className = 'meta-line';

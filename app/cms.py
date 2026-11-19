@@ -48,6 +48,7 @@ class PageInput(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     overview: str = Field(default='', max_length=10000)
     poster_path: str = ''
+    backdrop_path: str = ''
     release_date: str = ''
     rating: float | None = None
     media_type: str = 'movie'
@@ -516,6 +517,7 @@ async def tmdb_search(q: str, media_type: str = 'multi', _: bool = Depends(admin
                 'title': x.get('title') or x.get('name'),
                 'overview': x.get('overview', ''),
                 'poster_path': x.get('poster_path'),
+                'backdrop_path': x.get('backdrop_path'),
                 'release_date': x.get('release_date') or x.get('first_air_date', ''),
                 'rating': x.get('vote_average'),
             }
@@ -582,6 +584,8 @@ async def create_page(data: PageInput, _: bool = Depends(admin_auth)):
             doc['imdb_id'] = (meta.get('external_ids') or {}).get('imdb_id') or meta.get('imdb_id', '')
             doc['runtime'] = meta.get('runtime') or (meta.get('episode_run_time') or [None])[0]
             doc['tagline'] = meta.get('tagline', '')
+            if not doc.get('backdrop_path') and meta.get('backdrop_path'):
+                doc['backdrop_path'] = meta.get('backdrop_path')
         except Exception:
             pass
     doc['updated_at'] = doc['created_at']

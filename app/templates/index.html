@@ -2,12 +2,16 @@
 {% block title %}AniMoviesZoneflix · Movies & Series{% endblock %}
 {% block nav_home %}active{% endblock %}
 {% block content %}
-<div class="page-hero">
-  <div>
-    <h1>Discover anime & movies</h1>
-    <p>Explore anime, movies and series. Pick a title to watch or get it in Telegram.</p>
+<section class="backdrop-hero" id="homeHero" style="min-height:clamp(240px,48vw,480px)">
+  <div class="backdrop-img" id="homeHeroImg"></div>
+  <div class="backdrop-scrim"></div>
+  <div class="backdrop-content" style="display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-height:clamp(240px,48vw,480px)">
+    <div class="hero-eyebrow" style="color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-display)">AniMoviesZoneflix</div>
+    <h1 id="homeHeroTitle" style="font-size:clamp(1.6rem,5vw,3rem);margin:0 0 10px;line-height:1.08;background:linear-gradient(100deg,#fff 15%,#ffd1ad 55%,var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent">Discover anime & movies</h1>
+    <p id="homeHeroOverview" class="muted" style="max-width:60ch;margin-bottom:16px">Explore anime, movies and series. Pick a title to watch or get it in Telegram.</p>
+    <div id="homeHeroActions" style="display:flex;gap:10px;flex-wrap:wrap"></div>
   </div>
-</div>
+</section>
 
 <form class="search-bar" action="/search" method="get" role="search">
   <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
@@ -40,6 +44,38 @@
     if (!p) return '/static/images/poster.jpg';
     if (String(p).startsWith('http')) return p;
     return 'https://image.tmdb.org/t/p/w500' + p;
+  }
+
+  function backdropUrl(p) {
+    if (!p) return '';
+    if (String(p).startsWith('http')) return p;
+    return 'https://image.tmdb.org/t/p/w1280' + p;
+  }
+
+  function applyHero(list) {
+    const pick = list.find(x => x.backdrop_path) || list[0];
+    if (!pick) return;
+    const heroImg = document.getElementById('homeHeroImg');
+    const heroTitle = document.getElementById('homeHeroTitle');
+    const heroOverview = document.getElementById('homeHeroOverview');
+    const heroActions = document.getElementById('homeHeroActions');
+    const bg = backdropUrl(pick.backdrop_path) || posterUrl(pick.poster_path);
+    if (heroImg && bg) heroImg.style.backgroundImage = 'url("' + bg.replace(/"/g, '\\"') + '")';
+    if (heroTitle) heroTitle.textContent = pick.title || 'Discover anime & movies';
+    if (heroOverview) heroOverview.textContent = pick.overview || 'Explore anime, movies and series. Pick a title to watch or get it in Telegram.';
+    if (heroActions) {
+      heroActions.innerHTML = '';
+      const watchBtn = document.createElement('a');
+      watchBtn.className = 'btn btn-yellow';
+      watchBtn.href = '/title/' + encodeURIComponent(pick.slug);
+      watchBtn.textContent = '▶ Watch now';
+      const infoBtn = document.createElement('a');
+      infoBtn.className = 'btn';
+      infoBtn.href = '/title/' + encodeURIComponent(pick.slug);
+      infoBtn.textContent = 'More info';
+      heroActions.appendChild(watchBtn);
+      heroActions.appendChild(infoBtn);
+    }
   }
 
   function card(p) {
@@ -107,6 +143,7 @@
         return;
       }
       list.forEach(p => grid.appendChild(card(p)));
+      applyHero(list);
 
       const top = list.slice(0, 12);
       if (top.length) {

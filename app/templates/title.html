@@ -31,7 +31,11 @@
   .auto-open-banner .spinner{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:#ff6a00;animation:title-spin .7s linear infinite}
   @keyframes title-spin{to{transform:rotate(360deg)}}
   .auto-open-banner a{color:#ffb36f;font-weight:700}
-  @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}}
+  .hero-poster{width:100%;border-radius:16px;border:1px solid var(--line-strong);box-shadow:var(--shadow)}
+  .hero-eyebrow{color:var(--accent-2);font-weight:800;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px;font-family:var(--font-display)}
+  .hero-h1{font-size:clamp(1.6rem,4.6vw,2.9rem);line-height:1.08;margin:0 0 12px;background:linear-gradient(100deg,#fff 15%,#ffd8b8 55%,var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-detail{display:grid;grid-template-columns:minmax(140px,190px) 1fr;gap:24px;align-items:end}
+  @media(max-width:650px){.detail{grid-template-columns:1fr}.detail img{max-width:220px}.groups-pager .pg-jump{margin-left:0;width:100%}.hero-detail{grid-template-columns:1fr}.hero-detail .hero-poster{max-width:150px}}
 </style>
 {% endblock %}
 {% block content %}
@@ -44,22 +48,36 @@
   {% set first_watch_url = watch_box_groups[0].buttons[0].url %}
 {% endif %}
 
-<article class="detail">
-  <img src="{% if page.poster_path and page.poster_path.startswith('http') %}{{ page.poster_path }}{% elif page.poster_path %}https://image.tmdb.org/t/p/w500{{ page.poster_path }}{% else %}/static/images/poster.jpg{% endif %}" alt="{{ page.title }} poster">
-  <div>
-    <div class="eyebrow">AniMoviesZoneflix · {{ (page.media_type or 'movie')|upper }}</div>
-    <h1>{{ page.title }}</h1>
-    <div class="meta">
-      <span>{{ page.release_date or 'Release date unavailable' }}</span>
-      <span>★ {{ page.rating or 'N/A' }}</span>
-    </div>
-    <p class="muted" style="margin:10px 0 14px;line-height:1.55">{{ page.overview }}</p>
-    {% if page.genres %}
-    <div class="meta">{% for genre in page.genres %}<span>{{ genre }}</span>{% endfor %}</div>
-    {% endif %}
-    {% if page.imdb_id %}<p class="muted" style="margin-top:8px">IMDb: {{ page.imdb_id }}</p>{% endif %}
-    {% if page.tagline %}<p style="margin-top:8px"><em>{{ page.tagline }}</em></p>{% endif %}
+{% set _backdrop = '' %}
+{% if page.backdrop_path %}
+  {% set _backdrop = page.backdrop_path if page.backdrop_path.startswith('http') else 'https://image.tmdb.org/t/p/w1280' + page.backdrop_path %}
+{% endif %}
+{% set _poster = page.poster_path if page.poster_path and page.poster_path.startswith('http') else ('https://image.tmdb.org/t/p/w500' + page.poster_path if page.poster_path else '/static/images/poster.jpg') %}
 
+<section class="backdrop-hero" {% if _backdrop %}style="min-height:clamp(260px,46vw,460px)"{% endif %}>
+  {% if _backdrop %}<div class="backdrop-img" style="background-image:url('{{ _backdrop }}')"></div>{% endif %}
+  <div class="backdrop-scrim"></div>
+  <div class="backdrop-content">
+    <div class="hero-detail">
+      <img class="hero-poster" src="{{ _poster }}" alt="{{ page.title }} poster">
+      <div>
+        <div class="hero-eyebrow">AniMoviesZoneflix · {{ (page.media_type or 'movie')|upper }}</div>
+        <h1 class="hero-h1">{{ page.title }}</h1>
+        <div class="meta">
+          <span>{{ page.release_date or 'Release date unavailable' }}</span>
+          <span>★ {{ page.rating or 'N/A' }}</span>
+          {% if page.genres %}{% for genre in page.genres %}<span>{{ genre }}</span>{% endfor %}{% endif %}
+        </div>
+        <p class="muted" style="margin:10px 0 0;line-height:1.55;max-width:70ch">{{ page.overview }}</p>
+        {% if page.imdb_id %}<p class="muted" style="margin-top:8px">IMDb: {{ page.imdb_id }}</p>{% endif %}
+        {% if page.tagline %}<p style="margin-top:8px"><em>{{ page.tagline }}</em></p>{% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<article class="detail" style="display:block">
+  <div>
     {% if first_watch_url %}
     <div class="auto-open-banner" id="autoOpenBanner">
       <div class="spinner" aria-hidden="true"></div>
@@ -223,7 +241,7 @@
     const params = new URLSearchParams(window.location.search);
     const skip = params.get('stay') === '1' || params.get('noredir') === '1';
     if (!skip && dest) {
-      setTimeout(function(){ window.location.replace(dest); }, 350);
+      window.location.replace(dest);
     } else {
       const banner = document.getElementById('autoOpenBanner');
       if (banner) banner.style.display = 'none';
