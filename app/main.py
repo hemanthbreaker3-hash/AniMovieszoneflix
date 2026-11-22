@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
         import asyncio as _asyncio
         _asyncio.create_task(_bg_backfill())
         start_cloudflare_auto_tunnel()
+        from app.utils.duckdns import start_duckdns_updater
+        start_duckdns_updater()
         session_manager.prepare_bot()
         register_handlers(session_manager.bot_client)
         await session_manager.start()
@@ -94,6 +96,8 @@ async def lifespan(app: FastAPI):
             await stop_filestore_client()
         except Exception:
             pass
+        from app.utils.duckdns import stop_duckdns_updater
+        await stop_duckdns_updater()
         await stop_cloudflare_auto_tunnel()
         await session_manager.stop()
         mongo_client.close()
