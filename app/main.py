@@ -12,6 +12,7 @@ from app.database.connection import (
     load_custom_settings,
     get_active_cloudflare_url,
     get_active_vercel_website_url,
+    get_active_website_url,
     db,
 )
 from app.streamer.manager import session_manager
@@ -33,6 +34,7 @@ from app.utils.helpers import is_trycloudflare_url
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
+import time
 import logging
 import os
 import sys
@@ -403,6 +405,26 @@ async def register_view(short_code: str, request: Request):
             logger.warning("View registration failed for %s: %s", short_code, exc)
     latest = await files_col.find_one({"short_code": short_code}, {"access_count": 1})
     return {"views": int((latest or {}).get("access_count") or 0)}
+
+
+_FILE_META_CACHE: dict[str, tuple[dict, float]] = {}
+_REMUX_SEM = asyncio.Semaphore(4)
+_TRACKS_CACHE: dict[str, tuple[float, dict]] = {}
+_TRACKS_CACHE_TTL = 600.0
+
+
+async def _get_file_cached(short_code: str):
+    now = time.monotonic()
+    hit = _FILE_META_CACHE.get(short_code)
+    if hit and (now - hit[1]) < 60.0:
+        return hit[0]
+    doc = await files_col.find_one({"short_code": short_code})
+    if doc:
+        if len(_FILE_META_CACHE) > 5000:
+            for k in list(_FILE_META_CACHE.keys())[:1500]:
+                _FILE_META_CACHE.pop(k, None)
+        _FILE_META_CACHE[short_code] = (doc, now)
+    return doc
 
 
 @app.api_route("/dl/{short_code}", methods=["GET", "HEAD"])
