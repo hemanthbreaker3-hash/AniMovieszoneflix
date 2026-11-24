@@ -35,3 +35,8 @@ The tunnel is managed by the web application and restarts with the container.
 # High-speed multi-session download (optional)
 export SESSIONS=session1,session2,session3,session4
 export STREAM_CHUNK_SIZE=1048576
+
+
+### Dynu DDNS (bot-managed)
+
+Dynu hostname, username, and password are not deployment prompts or environment variables. Configure, test, and remove Dynu entirely through the Telegram bot admin command `/dynu`. Credentials are stored in MongoDB by the bot.

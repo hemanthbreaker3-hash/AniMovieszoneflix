@@ -120,3 +120,8 @@ The bot supports Dynu DDNS alongside the legacy DuckDNS updater. In Telegram, an
 - `/ip` — public IP helper (legacy DuckDNS display)
 
 Create a hostname in Dynu Control Panel → Dynamic DNS Service first. The Dynu update API uses the Dynu account username and DDNS password with Basic Authentication. When the app health endpoint is externally reachable, the bot updates backend/base URLs and catalog links. If reachability fails, check firewall ports and/or configure a reverse proxy such as Caddy. HTTPS is not automatically guaranteed by DDNS alone.
+
+
+### Dynu DDNS (bot-managed)
+
+Dynu hostname, username, and password are not deployment prompts or environment variables. Configure, test, and remove Dynu entirely through the Telegram bot admin command `/dynu`. Credentials are stored in MongoDB by the bot.

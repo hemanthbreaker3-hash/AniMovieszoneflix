@@ -63,19 +63,10 @@ else
 fi
 
 # Build .env without sourcing/evaluating user-controlled shell text.
+# Dynu DDNS is managed only through Telegram /dynu; deployment never prompts for Dynu credentials.
 # Pass the ngrok token with: export NGROK_AUTHTOKEN=YOUR_NGROK_AUTH_TOKEN
 
-# Interactive DuckDNS prompt (if TTY and not already set in env/.env)
-if [ -t 0 ] && [ -z "${DUCKDNS_DOMAIN:-}" ] && ! grep -Eq '^DUCKDNS_DOMAIN=.+' .env 2>/dev/null; then
-  printf "${GREEN}[%s]${NC} DuckDNS subdomain or URL (e.g. hitler-yt or hitler-yt.duckdns.org, Enter to skip): " "$APP_NAME"
-  read -r INPUT_DUCK_DOM || true
-  if [ -n "${INPUT_DUCK_DOM:-}" ]; then
-    export DUCKDNS_DOMAIN="$INPUT_DUCK_DOM"
-    printf "${GREEN}[%s]${NC} DuckDNS token (Enter to skip): " "$APP_NAME"
-    read -r INPUT_DUCK_TOK || true
-    [ -n "${INPUT_DUCK_TOK:-}" ] && export DUCKDNS_TOKEN="$INPUT_DUCK_TOK"
-  fi
-fi
+# DuckDNS is managed entirely through Telegram /duckdns; deployment never prompts for DuckDNS credentials.
 
 if [[ ! -f .env ]]; then
   [[ -f .env.example ]] || die ".env.example is missing."
