@@ -15,6 +15,10 @@ cd "$SCRIPT_DIR"
 [[ -f docker-compose.yml && -f Dockerfile && -f requirements.txt ]] || die "Run from the AniMoviesZoneflix project root; docker-compose.yml, Dockerfile and requirements.txt must exist."
 command -v python3 >/dev/null 2>&1 || die "Python 3 is required to validate and write the environment file."
 
+PROJECT_SLUG="$(basename "$SCRIPT_DIR" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^-+|-+$//g')"
+PROJECT_SLUG="${PROJECT_SLUG:-app}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$PROJECT_SLUG}"
+
 # Host prerequisites.
 if ! command -v curl >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
@@ -29,21 +33,19 @@ fi
 
 if ! command -v docker >/dev/null 2>&1; then
   info "Installing Docker Engine and Compose plugin..."
-  curl -fsSL https://get.docker.com -o /tmp/animovieszoneflix-get-docker.sh || die "Could not download Docker installer. Check VPS DNS/network access."
-  run_root sh /tmp/animovieszoneflix-get-docker.sh
-  rm -f /tmp/animovieszoneflix-get-docker.sh
+  curl -fsSL https://get.docker.com -o /tmp/${PROJECT_SLUG}-get-docker.sh || die "Could not download Docker installer. Check VPS DNS/network access."
+  run_root sh /tmp/${PROJECT_SLUG}-get-docker.sh
+  rm -f /tmp/${PROJECT_SLUG}-get-docker.sh
 fi
 run_root systemctl enable --now docker || die "Docker service could not be started. Check: sudo systemctl status docker --no-pager"
 
-# Prefer unprivileged Docker; use sudo for the whole Docker/Compose invocation
-# when this SSH session has not refreshed docker-group membership.
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then
   if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
     DOCKER=(sudo docker)
     warn "Using sudo for Docker because this login session lacks Docker socket permission."
   else
-    die "Docker daemon is not accessible. Check 'sudo systemctl status docker' and 'sudo docker info'. Do not chmod 666 the Docker socket."
+    die "Docker daemon is not accessible. Check 'sudo systemctl status docker' and 'sudo docker info'."
   fi
 fi
 
@@ -62,18 +64,22 @@ else
   if "${DOCKER[@]}" compose version >/dev/null 2>&1; then COMPOSE=("${DOCKER[@]}" compose); else die "Docker Compose is unavailable. Install the Docker Compose plugin and rerun."; fi
 fi
 
-# Build .env without sourcing/evaluating user-controlled shell text.
-# Dynu DDNS is managed only through Telegram /dynu; deployment never prompts for Dynu credentials.
-# Pass the ngrok token with: export NGROK_AUTHTOKEN=YOUR_NGROK_AUTH_TOKEN
-
-# DuckDNS is managed entirely through Telegram /duckdns; deployment never prompts for DuckDNS credentials.
-
+# Build .env without prompting for Dynu/DuckDNS credentials (bot-managed in Telegram).
+# Supports: export dns=duckdns | export dns=dynu | export dns=dyno | export dns=both | export dns=auto
 if [[ ! -f .env ]]; then
   [[ -f .env.example ]] || die ".env.example is missing."
   cp .env.example .env
 fi
-python3 - <<'PY'
-import json, os, pathlib, re, secrets
+
+# Detect current project's own running web port (if any) so re-deploys keep their port,
+# while a second deployment on the same VPS automatically picks a free port if 8000 is taken.
+OWN_WEB_PORT="$("${DOCKER[@]}" ps --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" --filter "label=com.docker.compose.service=web" --format '{{.Ports}}' 2>/dev/null | sed -nE 's/.*:([0-9]+)->.*/\1/p' | head -n 1 || true)"
+EXPLICIT_PORT_SET="0"
+if [ -n "${PORT:-}" ]; then EXPLICIT_PORT_SET="1"; fi
+
+OWN_WEB_PORT="$OWN_WEB_PORT" EXPLICIT_PORT_SET="$EXPLICIT_PORT_SET" python3 - <<'PY'
+import json, os, pathlib, re, secrets, socket
+
 p = pathlib.Path('.env')
 
 def read_env(path):
@@ -95,30 +101,77 @@ def read_env(path):
         result[key] = value
     return result
 
+def norm_dns(raw):
+    v = str(raw or '').strip().lower()
+    if v in ('duck', 'duckdns', 'duckdns.org'): return 'duckdns'
+    if v in ('dynu', 'dyno', 'dynu.com', 'dynu.net'): return 'dynu'
+    if v in ('both', 'all'): return 'both'
+    if v in ('none', 'off', 'disabled', 'false', '0'): return 'none'
+    return 'auto' if not v else v
+
+def port_in_use(port_num):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex(('127.0.0.1', port_num)) == 0
+
 values = read_env(p)
 values.update(read_env(pathlib.Path('config.env')))
-# Canonical environment variables win; support aliases used in older deploy commands.
-aliases = {'APP_ID':'API_ID', 'DATABASE_URI':'MONGODB_URI', 'DATABASE_URL':'MONGODB_URI', 'LOG_CHANNEL':'CHANNEL_ID'}
+
+aliases = {
+    'APP_ID': 'API_ID',
+    'DATABASE_URI': 'MONGODB_URI',
+    'DATABASE_URL': 'MONGODB_URI',
+    'LOG_CHANNEL': 'CHANNEL_ID',
+    'dns': 'DNS_PROVIDER',
+    'DNS': 'DNS_PROVIDER',
+}
 for alias, canonical in aliases.items():
     if os.environ.get(alias) and not os.environ.get(canonical):
         os.environ[canonical] = os.environ[alias]
-keys = ('API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS','MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT','DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','BRANDING','LOGO_URL','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN','TUNNEL_PROVIDER','CLOUDFLARE_URL','NGROK_URL','DUCKDNS_DOMAIN','DUCKDNS_TOKEN')
+
+keys = (
+    'API_ID','API_HASH','BOT_TOKEN','OWNER_ID','ADMINS','CHANNEL_ID','FORCE_SUB_CHANNELS',
+    'MONGODB_URI','DATABASE_NAME','REDIS_URL','BASE_URL','BACKEND_URL','WEBSITE_URL','PORT',
+    'DEBUG','DEFAULT_EXPIRY','SESSIONS','ADMIN_PANEL_TOKEN','TMDB_API_KEY','BRANDING',
+    'LOGO_URL','STREAM_CHUNK_SIZE','NGROK_AUTHTOKEN','TUNNEL_PROVIDER','CLOUDFLARE_URL',
+    'NGROK_URL','DUCKDNS_DOMAIN','DUCKDNS_TOKEN','DNS_PROVIDER'
+)
 for key in keys:
-    if key in os.environ: values[key] = os.environ[key]
-# Also accept legacy alias values from .env/config.env.
+    if key in os.environ:
+        values[key] = os.environ[key]
 for alias, canonical in aliases.items():
-    if values.get(alias) and not values.get(canonical): values[canonical] = values[alias]
-# Generate a strong dashboard password if unset or still a placeholder.
+    if values.get(alias) and not values.get(canonical):
+        values[canonical] = values[alias]
+
+values['DNS_PROVIDER'] = norm_dns(values.get('DNS_PROVIDER', 'auto'))
+
+# Auto-pick a free port if PORT was not explicitly exported and desired port is occupied by another deployment
+own_port = os.environ.get('OWN_WEB_PORT', '').strip()
+explicit_port = os.environ.get('EXPLICIT_PORT_SET', '0') == '1'
+try:
+    desired_port = int(str(values.get('PORT') or '8000').strip())
+except ValueError:
+    desired_port = 8000
+
+if not explicit_port and str(desired_port) != own_port and port_in_use(desired_port):
+    candidate = desired_port + 1
+    while candidate < 8100 and port_in_use(candidate) and str(candidate) != own_port:
+        candidate += 1
+    print(f"[INFO] Port {desired_port} is already in use by another service; assigning PORT={candidate} for this deployment.")
+    desired_port = candidate
+values['PORT'] = str(desired_port)
+
 if not values.get('ADMIN_PANEL_TOKEN') or values['ADMIN_PANEL_TOKEN'].lower().startswith(('replace-', 'change_me', 'your_')):
     values['ADMIN_PANEL_TOKEN'] = secrets.token_urlsafe(36)
-# Keep all existing extra keys, safely quoted for pydantic/dotenv.
-lines = ['# Generated by deploy.vps; contains secrets. Do not commit or share.']
-for key in sorted(values): lines.append(f'{key}={json.dumps(str(values[key]))}')
+
+lines = ['# Generated by deploy.vps (AniMoviesZoneflix); contains secrets. Do not commit or share.']
+for key in sorted(values):
+    lines.append(f'{key}={json.dumps(str(values[key]))}')
 p.write_text('\n'.join(lines) + '\n')
 os.chmod(p, 0o600)
 PY
 
-# Strict preflight: fail before building if a required setting is absent/placeholder.
+# Strict preflight validation
 python3 - <<'PY'
 import json, pathlib, re, sys
 v = {}
@@ -142,99 +195,42 @@ for k in ('ADMINS','FORCE_SUB_CHANNELS'):
 if v.get('CHANNEL_ID','').strip() and not re.fullmatch(r'-?\d+', v['CHANNEL_ID'].strip()):
     sys.exit('[ERROR] CHANNEL_ID must be numeric.')
 if not v['MONGODB_URI'].startswith(('mongodb://','mongodb+srv://')) or v['MONGODB_URI'] == 'mongodb://mongodb:27017':
-    sys.exit('[ERROR] Set a reachable MONGODB_URI (for example your MongoDB Atlas URI); the bundled local MongoDB service is not enabled in this deployment.')
+    sys.exit('[ERROR] Set a reachable MONGODB_URI (for example your MongoDB Atlas URI).')
 if len(v.get('ADMIN_PANEL_TOKEN','').strip()) < 24:
     sys.exit('[ERROR] ADMIN_PANEL_TOKEN must contain at least 24 characters.')
-if v.get('BASE_URL','').startswith(('http://localhost','http://127.0.0.1')):
-    print('[WARN] BASE_URL is localhost. Bot links will not work publicly until you set BASE_URL to your public HTTPS URL.')
 PY
 
-info "Validating Docker Compose configuration..."
+info "Validating Docker Compose configuration (project=${COMPOSE_PROJECT_NAME})..."
 "${COMPOSE[@]}" config --quiet || die "Compose configuration is invalid. Check .env and docker-compose.yml."
 info "Building and starting AniMoviesZoneflix..."
 "${COMPOSE[@]}" up -d --build --remove-orphans
 
-PORT_VALUE="$(python3 - <<'PY'
-import json, pathlib
+eval "$(python3 - <<'PY'
+import json, pathlib, shlex
+v={}
 for line in pathlib.Path('.env').read_text().splitlines():
-    if line.startswith('PORT='):
-        raw=line.split('=',1)[1].strip()
-        try: print(json.loads(raw))
-        except Exception: print(raw.strip('"'))
-        break
-else: print('8000')
+    if not line or line.lstrip().startswith('#') or '=' not in line: continue
+    k, raw = line.split('=', 1); raw = raw.strip()
+    try: val = json.loads(raw) if raw.startswith('"') else raw
+    except Exception: val = raw.strip('"')
+    v[k.strip()] = str(val)
+print(f"PORT_VALUE={shlex.quote(v.get('PORT') or '8000')}")
+print(f"DNS_MODE={shlex.quote((v.get('DNS_PROVIDER') or 'auto').strip().lower())}")
+print(f"PROVIDER={shlex.quote((v.get('TUNNEL_PROVIDER') or 'cloudflare').strip().lower())}")
 PY
 )"
 PORT_VALUE="${PORT_VALUE:-8000}"
+DNS_MODE="${DNS_MODE:-auto}"
+PROVIDER="${PROVIDER:-cloudflare}"
+
 info "Waiting up to 180 seconds for http://127.0.0.1:${PORT_VALUE}/health ..."
 for _ in $(seq 1 90); do
   if curl -fsS "http://127.0.0.1:${PORT_VALUE}/health" >/dev/null 2>&1; then
-    info "Web health check passed."
+    info "Web health check passed on port ${PORT_VALUE} (DNS_PROVIDER=${DNS_MODE})."
     info "Admin dashboard: /panel (username: admin; password stored in .env as ADMIN_PANEL_TOKEN)."
     "${COMPOSE[@]}" ps
 
-    # Public tunnel is started inside the web container based on TUNNEL_PROVIDER.
-    #   export TUNNEL_PROVIDER=cloudflare  → Cloudflare quick tunnel (*.trycloudflare.com), synced to MongoDB
-    #   export TUNNEL_PROVIDER=ngrok        → pyngrok (needs NGROK_AUTHTOKEN)
-    run_root systemctl disable --now file2link-cloudflared.service animovieszoneflix-ngrok.service >/dev/null 2>&1 || true
-    PROVIDER="$(python3 - <<'PY2'
-import json, pathlib
-v={}
-for line in pathlib.Path('.env').read_text().splitlines():
-    if not line or line.lstrip().startswith('#') or '=' not in line: continue
-    k, raw = line.split('=',1); raw=raw.strip()
-    try: val=json.loads(raw) if raw.startswith('"') else raw
-    except Exception: val=raw.strip('"')
-    v[k.strip()]=str(val)
-print((v.get('TUNNEL_PROVIDER') or 'cloudflare').strip().lower())
-PY2
-)"
     info "TUNNEL_PROVIDER=${PROVIDER}"
-    if [ "$PROVIDER" = "ngrok" ]; then
-      if grep -Eq '^NGROK_AUTHTOKEN=.+' .env && ! grep -Eq '^NGROK_AUTHTOKEN=("|\"")?\s*$' .env; then
-        info "ngrok selected. App will create an HTTPS ngrok URL on startup and sync it to MongoDB."
-      else
-        warn "TUNNEL_PROVIDER=ngrok but NGROK_AUTHTOKEN is empty. Add token or switch: export TUNNEL_PROVIDER=cloudflare"
-      fi
-    else
-      info "Cloudflare quick tunnel selected. App will generate https://*.trycloudflare.com and sync backend/stream URLs."
-      info "No Cloudflare account token is required for quick tunnels."
-    fi
-
-    # Auto-configure DuckDNS & Dynu + Caddy HTTPS reverse proxy (reads .env / MongoDB, never prompts)
-    DUCK_INFO="$(python3 - <<'PY_DUCK'
-import json, pathlib
-v={}
-for line in pathlib.Path('.env').read_text().splitlines():
-    if not line or line.lstrip().startswith('#') or '=' not in line: continue
-    k, raw = line.split('=',1); raw=raw.strip()
-    try: val=json.loads(raw) if raw.startswith('"') else raw
-    except Exception: val=raw.strip('"')
-    v[k.strip()]=str(val)
-dom = (v.get('DUCKDNS_DOMAIN') or '').strip().lower()
-if dom.startswith(('http://','https://')):
-    from urllib.parse import urlparse
-    dom = (urlparse(dom).hostname or '').lower()
-dom = dom.strip('.')
-if dom.endswith('.duckdns.org'):
-    dom = dom[:-len('.duckdns.org')]
-tok = (v.get('DUCKDNS_TOKEN') or '').strip()
-print(f"{dom}|{tok}")
-PY_DUCK
-)"
-    DUCK_DOM="${DUCK_INFO%%|*}"
-    DUCK_TOK="${DUCK_INFO#*|}"
-    if [ -z "$DUCK_DOM" ] || [ -z "$DUCK_TOK" ]; then
-      MONGO_DUCK="$("${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.duckdns import get_duckdns_config; d,t=asyncio.run(get_duckdns_config()); print(f'{d}|{t}')" 2>/dev/null | tail -n 1 || true)"
-      if [[ "$MONGO_DUCK" == *"|"* ]]; then
-        DUCK_DOM="${MONGO_DUCK%%|*}"
-        DUCK_TOK="${MONGO_DUCK#*|}"
-      fi
-    fi
-
-    DYNU_HOST="$("${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.dynu import get_full_config; c=asyncio.run(get_full_config()); print(c.get('hostname',''))" 2>/dev/null | tail -n 1 || true)"
-    DYNU_HOST="$(printf '%s' "$DYNU_HOST" | tr -d '\r\n ')"
-
     # Open HTTP/HTTPS/App ports in host firewall if active
     if command -v ufw >/dev/null 2>&1 && run_root ufw status 2>/dev/null | grep -qi "Status: active"; then
       run_root ufw allow 80/tcp >/dev/null 2>&1 || true
@@ -248,11 +244,50 @@ PY_DUCK
       run_root firewall-cmd --reload >/dev/null 2>&1 || true
     fi
 
+    # Resolve active DuckDNS / Dynu hostnames according to DNS_MODE (duckdns | dynu | both | auto | none)
+    DUCK_DOM=""; DUCK_TOK=""; DYNU_HOST=""
+    if [ "$DNS_MODE" = "duckdns" ] || [ "$DNS_MODE" = "both" ] || [ "$DNS_MODE" = "auto" ]; then
+      DUCK_INFO="$(python3 - <<'PY_DUCK'
+import json, pathlib
+from urllib.parse import urlparse
+v={}
+for line in pathlib.Path('.env').read_text().splitlines():
+    if not line or line.lstrip().startswith('#') or '=' not in line: continue
+    k, raw = line.split('=',1); raw=raw.strip()
+    try: val=json.loads(raw) if raw.startswith('"') else raw
+    except Exception: val=raw.strip('"')
+    v[k.strip()]=str(val)
+dom = (v.get('DUCKDNS_DOMAIN') or '').strip().lower()
+if dom.startswith(('http://','https://')): dom = (urlparse(dom).hostname or '').lower()
+dom = dom.strip('.')
+if dom.endswith('.duckdns.org'): dom = dom[:-len('.duckdns.org')]
+tok = (v.get('DUCKDNS_TOKEN') or '').strip()
+print(f"{dom}|{tok}")
+PY_DUCK
+)"
+      DUCK_DOM="${DUCK_INFO%%|*}"
+      DUCK_TOK="${DUCK_INFO#*|}"
+      if [ -z "$DUCK_DOM" ] || [ -z "$DUCK_TOK" ]; then
+        MONGO_DUCK="$("${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.duckdns import get_duckdns_config; d,t=asyncio.run(get_duckdns_config()); print(f'{d}|{t}')" 2>/dev/null | tail -n 1 || true)"
+        if [[ "$MONGO_DUCK" == *"|"* ]]; then
+          DUCK_DOM="${MONGO_DUCK%%|*}"
+          DUCK_TOK="${MONGO_DUCK#*|}"
+        fi
+      fi
+    fi
+
+    if [ "$DNS_MODE" = "dynu" ] || [ "$DNS_MODE" = "both" ] || [ "$DNS_MODE" = "auto" ]; then
+      DYNU_HOST="$("${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.dynu import get_full_config; c=asyncio.run(get_full_config()); print(c.get('hostname',''))" 2>/dev/null | tail -n 1 || true)"
+      DYNU_HOST="$(printf '%s' "$DYNU_HOST" | tr -d '\r\n ')"
+    fi
+
     if [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; then
       PUBLIC_IP="$(curl -fsS --max-time 6 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 6 https://ifconfig.me/ip 2>/dev/null || true)"
       curl -fsS --max-time 10 "https://www.duckdns.org/update?domains=${DUCK_DOM}&token=${DUCK_TOK}&ip=${PUBLIC_IP}" >/dev/null 2>&1 || warn "DuckDNS initial update returned an error"
     fi
 
+    # Conflict-free multi-deployment Caddy setup:
+    # Each deployment manages ONLY /etc/caddy/conf.d/${PROJECT_SLUG}.caddy
     if { [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; } || [ -n "$DYNU_HOST" ]; then
       if ! command -v caddy >/dev/null 2>&1; then
         info "Installing Caddy for automatic HTTPS reverse proxy..."
@@ -268,17 +303,20 @@ PY_DUCK
         fi
       fi
       if command -v caddy >/dev/null 2>&1; then
-        run_root mkdir -p /etc/caddy
-        CADDY_CONF=""
+        run_root mkdir -p /etc/caddy/conf.d
+        if [ ! -f /etc/caddy/Caddyfile ] || ! grep -q 'conf\.d/\*\.caddy' /etc/caddy/Caddyfile 2>/dev/null; then
+          printf "import /etc/caddy/conf.d/*.caddy\n" | run_root tee /etc/caddy/Caddyfile >/dev/null
+        fi
+        SITE_CONF=""
         if [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; then
-          info "Adding Caddy HTTPS reverse proxy for ${DUCK_DOM}.duckdns.org -> 127.0.0.1:${PORT_VALUE}"
-          CADDY_CONF+="${DUCK_DOM}.duckdns.org {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
+          info "Configuring Caddy (/etc/caddy/conf.d/${PROJECT_SLUG}.caddy): ${DUCK_DOM}.duckdns.org -> 127.0.0.1:${PORT_VALUE}"
+          SITE_CONF+="${DUCK_DOM}.duckdns.org {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
         fi
         if [ -n "$DYNU_HOST" ]; then
-          info "Adding Caddy HTTPS reverse proxy for ${DYNU_HOST} -> 127.0.0.1:${PORT_VALUE}"
-          CADDY_CONF+="${DYNU_HOST} {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
+          info "Configuring Caddy (/etc/caddy/conf.d/${PROJECT_SLUG}.caddy): ${DYNU_HOST} -> 127.0.0.1:${PORT_VALUE}"
+          SITE_CONF+="${DYNU_HOST} {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
         fi
-        printf "%b" "$CADDY_CONF" | run_root tee /etc/caddy/Caddyfile >/dev/null
+        printf "%b" "$SITE_CONF" | run_root tee "/etc/caddy/conf.d/${PROJECT_SLUG}.caddy" >/dev/null
         run_root systemctl enable --now caddy >/dev/null 2>&1 || true
         run_root systemctl reload caddy >/dev/null 2>&1 || run_root systemctl restart caddy >/dev/null 2>&1 || true
 
@@ -318,6 +356,9 @@ PY_DUCK
       else
         warn "Could not install Caddy automatically; Cloudflare tunnel remains active as fallback."
       fi
+    elif [ -f "/etc/caddy/conf.d/${PROJECT_SLUG}.caddy" ]; then
+      run_root rm -f "/etc/caddy/conf.d/${PROJECT_SLUG}.caddy"
+      run_root systemctl reload caddy >/dev/null 2>&1 || true
     fi
 
     info "Follow tunnel startup and URL synchronization with: docker compose logs -f web"

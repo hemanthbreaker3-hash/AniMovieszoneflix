@@ -307,6 +307,35 @@ async def get_full_config() -> dict[str, Any]:
     }
 
 
+
+def normalize_dns_provider(raw: str | None) -> str:
+    val = (raw or "").strip().lower()
+    if val in ("duck", "duckdns", "duckdns.org"):
+        return "duckdns"
+    if val in ("dynu", "dyno", "dynu.com", "dynu.net"):
+        return "dynu"
+    if val in ("both", "all"):
+        return "both"
+    if val in ("none", "off", "disabled", "false", "0"):
+        return "none"
+    return "auto"
+
+
+def get_active_dns_provider() -> str:
+    raw = os.getenv("DNS_PROVIDER") or os.getenv("dns") or os.getenv("DNS") or getattr(settings, "DNS_PROVIDER", "auto")
+    return normalize_dns_provider(str(raw))
+
+
+def is_dynu_enabled_for_deployment() -> bool:
+    return get_active_dns_provider() in ("dynu", "both", "auto")
+
+
+async def get_dynu_config() -> dict[str, Any]:
+    """Backward-compatible helper returning Dynu config dict."""
+    cfg = await get_full_config()
+    return {"domain": cfg["hostname"], **cfg}
+
+
 async def get_config() -> tuple[str, str, str]:
     """Backward-compatible helper returning (hostname, username, password)."""
     cfg = await get_full_config()
@@ -781,21 +810,22 @@ async def _loop() -> None:
     while not _stop:
         reachable = True
         try:
-            cfg = await get_full_config()
-            ready, _ = is_method_ready(cfg)
-            if ready:
-                ok, res, ip, url, reachable = await sync_activate()
-                if ok:
-                    logger.info(
-                        "Dynu [%s] updated %s -> %s; url=%s reachable=%s",
-                        cfg["method"],
-                        cfg["hostname"],
-                        ip,
-                        url,
-                        reachable,
-                    )
-                else:
-                    logger.warning("Dynu [%s] update failed for %s: %s", cfg["method"], cfg["hostname"], res)
+            if is_dynu_enabled_for_deployment():
+                cfg = await get_full_config()
+                ready, _ = is_method_ready(cfg)
+                if ready:
+                    ok, res, ip, url, reachable = await sync_activate()
+                    if ok:
+                        logger.info(
+                            "Dynu [%s] updated %s -> %s; url=%s reachable=%s",
+                            cfg["method"],
+                            cfg["hostname"],
+                            ip,
+                            url,
+                            reachable,
+                        )
+                    else:
+                        logger.warning("Dynu [%s] update failed for %s: %s", cfg["method"], cfg["hostname"], res)
         except asyncio.CancelledError:
             break
         except Exception:
