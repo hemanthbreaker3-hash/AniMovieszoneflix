@@ -2281,56 +2281,46 @@ def register_handlers(bot):
         user = message.from_user
         if not user or user.is_bot: return
         if not _is_admin_user(user.id): return await message.reply("🚫 **Unauthorized Access**")
-        from app.utils.dynu import get_config, get_public_ip, normalize_dynu_host, update_once, probe, sync_activate
-        args=(message.text or "").split(maxsplit=3)
-        host,username,password=await get_config(); ip=await get_public_ip()
+        from app.utils.dynu import get_config, get_public_ip, sync_activate
+        host, username, password = await get_config(); ip=await get_public_ip()
         doc=await settings_col.find_one({"key":"dynu_url"}) or {}
-        if len(args)==1:
-            masked="configured" if password else "not set"
-            return await message.reply(
-                "🌐 **Dynu DDNS — setup & usage guide**\n\n"
-                f"> Host: `{host or 'not set'}`\n> Username: `{username or 'not set'}`\n> Password: `{masked}`\n"
-                f"> Public IP: `{ip or 'unknown'}`\n> Active URL: `{doc.get('value') or 'not set'}`\n\n"
-                "**Setup on dynu.com:**\n1. Sign in at https://www.dynu.com/\n2. Open Control Panel → Dynamic DNS Service → Add.\n"
-                "3. Create/select a hostname (e.g. `yourname.webredirect.org` or `yourname.xubi.org`).\n"
-                "4. In this bot send: `/dynu hostname username password` (hostname is the full domain; use your Dynu account username and DDNS password).\n"
-                "5. The bot updates the public IP, probes `/health`, and if reachable applies the URL to backend/base URL and catalog buttons.\n\n"
-                "**Commands:** `/dynu host user pass` setup/update · `/dynu test` re-sync and test · `/dynu off` disable/remove · `/ip` public IP\n"
-                "**Network:** make your app port reachable, or configure Caddy/Nginx on 80/443 to reverse-proxy to the app. HTTPS availability depends on that setup."
-            )
-        if args[1].lower() in ('off','disable','clear'):
+        args=(message.text or "").split()
+        if len(args)>1 and args[1].lower() in ("off","disable","clear"):
             await settings_col.delete_many({"key":{"$in":["dynu_hostname","dynu_username","dynu_password","dynu_url"]}})
-            return await message.reply("🛑 Dynu configuration cleared and updater disabled.")
-        if args[1].lower()=='test':
-            if not host or not username or not password:return await message.reply("⚠️ Dynu is not configured. Use `/dynu hostname username password`.")
-            status=await message.reply("🔄 Updating Dynu and checking URL reachability…")
+            return await message.reply("🛑 Dynu configuration cleared.")
+        if len(args)>1 and args[1].lower()=="test":
+            if not host or not username or not password: return await message.reply("⚠️ Set hostname, username and password first with `/dynuhost`, `/dynuuser`, `/dynupass`.")
+            status=await message.reply("🔄 Updating Dynu and checking URL…")
             ok,res,ip,url,reach=await sync_activate(user.id)
-            if not ok:return await status.edit_text(f"❌ **Dynu update failed:** `{res}`")
-            return await status.edit_text(f"✅ **Dynu test:** `{res}`\nIP: `{ip or 'unknown'}`\nURL: `{url}`\nReachable: `{reach}`")
-        if len(args)<4:return await message.reply("⚠️ Usage: `/dynu full-hostname username password`\nUse `/dynu` for the guide.")
-        host=normalize_dynu_host(args[1]); username=args[2].strip(); password=args[3].strip()
-        status=await message.reply("🔄 Authenticating with Dynu and updating IP…")
-        ok,res,ip=await update_once(host,username,password)
-        if not ok:return await status.edit_text(f"❌ **Dynu update failed:** `{res}`\nCheck hostname, username and DDNS password. Avoid sharing credentials.")
-        now=datetime.datetime.utcnow()
-        for key,value in (("dynu_hostname",host),("dynu_username",username),("dynu_password",password)):
-            await settings_col.update_one({"key":key},{"$set":{"value":value,"updated_by":user.id,"updated_at":now}},upsert=True)
-        port=int(str(os.getenv("PORT") or getattr(settings,"PORT",None) or "8000"))
-        url,reach=await probe(host,port); meta={"value":url,"updated_by":user.id,"updated_at":now}
-        await settings_col.update_one({"key":"dynu_url"},{"$set":meta},upsert=True)
-        note=""
-        if reach:
-            settings.BACKEND_URL=url;os.environ["BACKEND_URL"]=url
-            await settings_col.update_one({"key":"backend_url"},{"$set":meta},upsert=True)
-            base_doc=await settings_col.find_one({"key":"base_url"}) or {}; current=str(base_doc.get("value") or "").lower()
-            if not (".pages.dev" in current or (current.startswith(("http://","https://")) and "vercel.app" not in current and "trycloudflare.com" not in current and host not in current)):
-                settings.BASE_URL=url;os.environ["BASE_URL"]=url;await settings_col.update_one({"key":"base_url"},{"$set":meta},upsert=True)
-            try:rewritten=await rewrite_all_stored_catalog_buttons(url)
-            except Exception:rewritten=0
-            note=f"\n✅ Reachable; URLs activated and `{rewritten}` catalog pages updated."
-        else:
-            note=f"\n⚠️ DNS updated, but `{url}/health` is not reachable. Check firewall and proxy/port `{port}`."
-        await status.edit_text(f"✅ **Dynu Updated!**\nHost: `{host}`\nIP: `{ip or 'unknown'}`\nResult: `{res}`\nURL: `{url}`{note}\n\nUse `/dynu` to view guide/status or `/dynu test` to test again.")
+            if not ok: return await status.edit_text(f"❌ Dynu update failed: `{res}`")
+            return await status.edit_text(f"✅ Dynu result: `{res}`\nIP: `{ip or 'unknown'}`\nURL: `{url}`\nReachable: `{reach}`")
+        return await message.reply(
+            "🌐 **Dynu DDNS settings**\n\n"
+            f"> Hostname: `{host or 'not set'}`\n> Username: `{username or 'not set'}`\n> Password: `{'set' if password else 'not set'}`\n"
+            f"> Public IP: `{ip or 'unknown'}`\n> Active URL: `{doc.get('value') or 'not set'}`\n\n"
+            "**Set each value separately:**\n"
+            "• `/dynuhost your-full-hostname`\n• `/dynuuser your-Dynu-username`\n• `/dynupass your-Dynu-password`\n"
+            "• `/dynu test` — update and check reachability\n• `/dynu off` — clear settings\n\n"
+            "After setting all three values, run `/dynu test`. Do not send credentials in public chats."
+        )
+
+    @bot.on_message(filters.command(["dynuhost", "dynuuser", "dynupass", "dynu_test"]))
+    async def dynu_value_handler(client, message: Message):
+        user=message.from_user
+        if not user or user.is_bot: return
+        if not _is_admin_user(user.id): return await message.reply("🚫 **Unauthorized Access**")
+        from app.utils.dynu import normalize_dynu_host, get_config, sync_activate
+        args=(message.text or "").split(maxsplit=1); cmd=(message.command[0] if getattr(message,"command",None) else (message.text or "").split()[0].lstrip("/"))
+        if len(args)<2 or not args[1].strip(): return await message.reply(f"⚠️ Usage: `/{cmd} value`")
+        val=args[1].strip(); keymap={"dynuhost":"dynu_hostname","dynuuser":"dynu_username","dynupass":"dynu_password"}
+        if cmd.lower() not in keymap: return await message.reply("Use `/dynu test` to test configuration.")
+        if cmd.lower()=="dynuhost":
+            val=normalize_dynu_host(val)
+            if not val or "." not in val: return await message.reply("⚠️ Enter the full Dynu hostname, such as `name.webredirect.org`.")
+        await settings_col.update_one({"key":keymap[cmd.lower()]},{"$set":{"value":val,"updated_by":user.id,"updated_at":datetime.datetime.utcnow()}},upsert=True)
+        host,username,password=await get_config()
+        ready=bool(host and username and password)
+        return await message.reply(f"✅ **{cmd} saved.**\n"+("All three values are set. Run `/dynu test` to update and activate." if ready else "Set the remaining values using `/dynuhost`, `/dynuuser` and `/dynupass`."))
 
     @bot.on_message(filters.command("duckdns"))
     async def duckdns_handler(client, message: Message):

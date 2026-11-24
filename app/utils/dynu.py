@@ -24,37 +24,20 @@ async def get_config():
     except Exception: docs={}
     return (normalize_dynu_host(docs.get('dynu_hostname')),str(docs.get('dynu_username') or '').strip(),str(docs.get('dynu_password') or '').strip())
 def _update(host,user,password,ip):
-    """Try Dynu's documented Basic auth and query-credential variants."""
-    common={'hostname':host}
-    if ip:
-        common['myip']=ip
-    modes=[]
-    # Dynu documents Basic authentication and query-string credentials.
-    modes.append(('basic',dict(common)))
-    modes.append(('query-user',dict(common, username=user, password=password)))
-    # Some Dynu configurations use a dedicated IP-update password.
-    modes.append(('query-password',dict(common, password=password)))
-    last='unknown response'
-    for mode,params in modes:
-        qs=urllib.parse.urlencode(params)
-        req=urllib.request.Request('https://api.dynu.com/nic/update?'+qs,headers={'User-Agent':'AniMovieszoneflix-Dynu/1.1'})
-        if mode=='basic':
-            import base64
-            req.add_header('Authorization','Basic '+base64.b64encode(f'{user}:{password}'.encode()).decode())
-        try:
-            with urllib.request.urlopen(req,timeout=15) as r:
-                result=r.read().decode(errors='replace').strip()
-        except Exception as e:
-            last=str(e)
-            continue
-        code=result.split()[0].lower() if result else ''
-        if code in ('good','nochg'):
-            return True,result
-        last=result
-        if code not in ('badauth',''):
-            # Don't retry alternate credentials for unrelated errors.
-            return False,result
-    return False,last
+    """Dynu NIC update endpoint using HTTP Basic auth and hostname/IP parameters."""
+    import base64
+    params={'hostname':host}
+    if ip: params['myip']=ip
+    req=urllib.request.Request('https://api.dynu.com/nic/update?'+urllib.parse.urlencode(params),headers={'User-Agent':'AniMovieszoneflix-Dynu/2.0'})
+    req.add_header('Authorization','Basic '+base64.b64encode(f'{user}:{password}'.encode()).decode())
+    try:
+        with urllib.request.urlopen(req,timeout=20) as r: result=r.read().decode(errors='replace').strip()
+    except urllib.error.HTTPError as e:
+        result=e.read().decode(errors='replace').strip() or str(e)
+    except Exception as e:
+        return False,str(e)
+    code=result.split()[0].lower() if result else ''
+    return code in ('good','nochg'),result or 'empty response'
 
 async def update_once(host,user,password,ip=None):
     host=normalize_dynu_host(host); user=(user or '').strip(); password=(password or '').strip()
