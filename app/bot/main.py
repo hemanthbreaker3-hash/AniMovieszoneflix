@@ -356,23 +356,16 @@ async def deliver_filestore_file(client, user_id: int, file_data: dict, reply_to
 
     button_rows = []
     try:
-        # Prefer configured base_url in bot/DB first so watch & download links never use an old domain
-        base_doc, runtime, watch_fallback, media_base = await asyncio.gather(
-            settings_col.find_one({"key": "base_url"}, {"value": 1}),
-            db.site_settings.find_one({"_id": "runtime"}),
-            get_watch_page_base_url(),
-            get_active_cloudflare_url(),
-        )
-        runtime = runtime or {}
-        configured_base = ""
-        raw_cfg_base = str((base_doc or {}).get("value") or settings.BASE_URL or "").strip()
-        if raw_cfg_base and not raw_cfg_base.startswith(("http://localhost", "http://127.0.0.1")):
+        # Watch Online → Vercel website (proxies stream to VPS). Download can use same.
+        watch_base = await get_watch_page_base_url()
+        media_base = await get_active_cloudflare_url()
+        if not watch_base:
             try:
-                configured_base = normalize_public_base_url(raw_cfg_base)
+                watch_base = normalize_public_base_url(settings.BASE_URL or settings.WEBSITE_URL or "")
             except Exception:
-                configured_base = raw_cfg_base.rstrip("/")
-        watch_base = configured_base or watch_fallback
-        dl_base = configured_base or watch_base or media_base
+                watch_base = (settings.BASE_URL or settings.WEBSITE_URL or "").rstrip("/")
+        dl_base = watch_base or media_base
+        runtime = await db.site_settings.find_one({"_id": "runtime"}) or {}
         downloads_enabled = runtime.get("downloads_enabled", True)
         streaming_enabled = runtime.get("streaming_enabled", True)
         fs_username = (runtime.get("filestore_bot_username") or "").strip().lstrip("@")
@@ -818,8 +811,8 @@ async def setup_bot_commands(bot):
             BotCommand("password", "Set website panel password (admin)"),
             BotCommand("backendurl", "Set backend / ngrok URL (admin)"),
             BotCommand("baseurl", "Set primary / ngrok URL (admin)"),
-            BotCommand("duckdns", "Configure DuckDNS dynamic DNS (admin)"),
-            BotCommand("dynu", "Configure Dynu dynamic DNS (admin)"),
+            BotCommand("dynu", "Configure Dynu DDNS, URL activation and guide (admin)"),
+            BotCommand("duckdns", "Configure legacy DuckDNS dynamic DNS (admin)"),
             BotCommand("ip", "Get VPS public IP for DuckDNS (admin)"),
             BotCommand("filestore", "Set FileStore bot for deep-link downloads (admin)"),
             BotCommand("fspanel", "FileStore panel: admins, fsub, auto-delete (admin)"),
@@ -2266,8 +2259,6 @@ def register_handlers(bot):
         ip = await get_public_ip()
         port = str(os.getenv("PORT") or getattr(settings, "PORT", None) or "8000").strip()
         dom, _ = await get_duckdns_config()
-        from app.utils.dynu import get_dynu_config
-        dynu_cfg = await get_dynu_config()
         if not ip:
             return await wait_msg.edit_text("❌ Could not detect VPS public IP.")
         direct_url = f"http://{ip}" if port == "80" else f"http://{ip}:{port}"
@@ -2282,10 +2273,64 @@ def register_handlers(bot):
             lines.append(f"> 🦆 **DuckDNS Host:** `{dom}.duckdns.org`")
             lines.append(f"> 🌐 **DuckDNS HTTP URL:** `{duck_http}`")
             lines.append(f"> 🔒 **DuckDNS HTTPS URL:** `https://{dom}.duckdns.org`")
-        if dynu_cfg.get("domain"):
-            lines.append(f"> 🌐 **Dynu Host:** `{dynu_cfg['domain']}` (https://{dynu_cfg['domain']})")
-        lines.append("\n💡 Paste this IP in duckdns.org/dynu.com or run `/duckdns` / `/dynu`.")
+        lines.append("\n💡 Paste this IP in duckdns.org or run `/duckdns <subdomain> <token>`.")
         await wait_msg.edit_text("\n".join(lines))
+
+    @bot.on_message(filters.command("dynu"))
+    async def dynu_handler(client, message: Message):
+        user = message.from_user
+        if not user or user.is_bot: return
+        if not _is_admin_user(user.id): return await message.reply("🚫 **Unauthorized Access**")
+        from app.utils.dynu import get_config, get_public_ip, normalize_dynu_host, update_once, probe, sync_activate
+        args=(message.text or "").split(maxsplit=3)
+        host,username,password=await get_config(); ip=await get_public_ip()
+        doc=await settings_col.find_one({"key":"dynu_url"}) or {}
+        if len(args)==1:
+            masked="configured" if password else "not set"
+            return await message.reply(
+                "🌐 **Dynu DDNS — setup & usage guide**\n\n"
+                f"> Host: `{host or 'not set'}`\n> Username: `{username or 'not set'}`\n> Password: `{masked}`\n"
+                f"> Public IP: `{ip or 'unknown'}`\n> Active URL: `{doc.get('value') or 'not set'}`\n\n"
+                "**Setup on dynu.com:**\n1. Sign in at https://www.dynu.com/\n2. Open Control Panel → Dynamic DNS Service → Add.\n"
+                "3. Create/select a hostname (e.g. `yourname.webredirect.org` or `yourname.xubi.org`).\n"
+                "4. In this bot send: `/dynu hostname username password` (hostname is the full domain; use your Dynu account username and DDNS password).\n"
+                "5. The bot updates the public IP, probes `/health`, and if reachable applies the URL to backend/base URL and catalog buttons.\n\n"
+                "**Commands:** `/dynu host user pass` setup/update · `/dynu test` re-sync and test · `/dynu off` disable/remove · `/ip` public IP\n"
+                "**Network:** make your app port reachable, or configure Caddy/Nginx on 80/443 to reverse-proxy to the app. HTTPS availability depends on that setup."
+            )
+        if args[1].lower() in ('off','disable','clear'):
+            await settings_col.delete_many({"key":{"$in":["dynu_hostname","dynu_username","dynu_password","dynu_url"]}})
+            return await message.reply("🛑 Dynu configuration cleared and updater disabled.")
+        if args[1].lower()=='test':
+            if not host or not username or not password:return await message.reply("⚠️ Dynu is not configured. Use `/dynu hostname username password`.")
+            status=await message.reply("🔄 Updating Dynu and checking URL reachability…")
+            ok,res,ip,url,reach=await sync_activate(user.id)
+            if not ok:return await status.edit_text(f"❌ **Dynu update failed:** `{res}`")
+            return await status.edit_text(f"✅ **Dynu test:** `{res}`\nIP: `{ip or 'unknown'}`\nURL: `{url}`\nReachable: `{reach}`")
+        if len(args)<4:return await message.reply("⚠️ Usage: `/dynu full-hostname username password`\nUse `/dynu` for the guide.")
+        host=normalize_dynu_host(args[1]); username=args[2].strip(); password=args[3].strip()
+        status=await message.reply("🔄 Authenticating with Dynu and updating IP…")
+        ok,res,ip=await update_once(host,username,password)
+        if not ok:return await status.edit_text(f"❌ **Dynu update failed:** `{res}`\nCheck hostname, username and DDNS password. Avoid sharing credentials.")
+        now=datetime.datetime.utcnow()
+        for key,value in (("dynu_hostname",host),("dynu_username",username),("dynu_password",password)):
+            await settings_col.update_one({"key":key},{"$set":{"value":value,"updated_by":user.id,"updated_at":now}},upsert=True)
+        port=int(str(os.getenv("PORT") or getattr(settings,"PORT",None) or "8000"))
+        url,reach=await probe(host,port); meta={"value":url,"updated_by":user.id,"updated_at":now}
+        await settings_col.update_one({"key":"dynu_url"},{"$set":meta},upsert=True)
+        note=""
+        if reach:
+            settings.BACKEND_URL=url;os.environ["BACKEND_URL"]=url
+            await settings_col.update_one({"key":"backend_url"},{"$set":meta},upsert=True)
+            base_doc=await settings_col.find_one({"key":"base_url"}) or {}; current=str(base_doc.get("value") or "").lower()
+            if not (".pages.dev" in current or (current.startswith(("http://","https://")) and "vercel.app" not in current and "trycloudflare.com" not in current and host not in current)):
+                settings.BASE_URL=url;os.environ["BASE_URL"]=url;await settings_col.update_one({"key":"base_url"},{"$set":meta},upsert=True)
+            try:rewritten=await rewrite_all_stored_catalog_buttons(url)
+            except Exception:rewritten=0
+            note=f"\n✅ Reachable; URLs activated and `{rewritten}` catalog pages updated."
+        else:
+            note=f"\n⚠️ DNS updated, but `{url}/health` is not reachable. Check firewall and proxy/port `{port}`."
+        await status.edit_text(f"✅ **Dynu Updated!**\nHost: `{host}`\nIP: `{ip or 'unknown'}`\nResult: `{res}`\nURL: `{url}`{note}\n\nUse `/dynu` to view guide/status or `/dynu test` to test again.")
 
     @bot.on_message(filters.command("duckdns"))
     async def duckdns_handler(client, message: Message):
@@ -2360,98 +2405,6 @@ def register_handlers(bot):
         await status.edit_text(
             "✅ **DuckDNS Updated!**\n\n"
             f"> 🌐 **Host:** `{dom}.duckdns.org` (`{res}`)\n"
-            f"> 🖥 **Synced IP:** `{ip or 'auto'}`\n"
-            f"{reach_note}"
-        )
-
-    @bot.on_message(filters.command("dynu"))
-    async def dynu_handler(client, message: Message):
-        user = message.from_user
-        if not user or user.is_bot:
-            return
-        if not _is_admin_user(user.id):
-            return await message.reply("🚫 **Unauthorized Access**")
-        from app.utils.dynu import (
-            get_dns_provider,
-            get_dynu_config,
-            normalize_dynu_domain,
-            probe_dynu_url,
-            update_dynu_once,
-        )
-        from app.utils.duckdns import get_public_ip
-        args = (message.text or "").split()
-        if len(args) < 2:
-            cfg = await get_dynu_config()
-            dom = cfg["domain"]
-            secret = cfg["api_key"] or cfg["client_secret"] or cfg["password"]
-            auth_mode = "OAuth2" if (cfg["client_id"] and cfg["client_secret"]) else ("API Key" if cfg["api_key"] else ("Password" if cfg["password"] else "not set"))
-            ip = await get_public_ip()
-            prov = await get_dns_provider()
-            port = str(os.getenv("PORT") or getattr(settings, "PORT", None) or "8000").strip()
-            masked = (secret[:4] + "..." + secret[-4:]) if len(secret) > 8 else ("set" if secret else "not set")
-            url_doc = await settings_col.find_one({"key": "dynu_url"}) or {}
-            return await message.reply(
-                "🌐 **Dynu Dynamic DNS**\n\n"
-                f"> 🔀 **Active Provider:** `{prov}`\n"
-                f"> 🌐 **Hostname:** `{dom or 'Not configured'}`\n"
-                f"> 🔐 **Auth Mode:** `{auth_mode}` (`{masked}`)\n"
-                f"> 🖥 **VPS IP:** `{ip or 'unknown'}` (Port `{port}`)\n"
-                f"> 🔗 **Active Dynu URL:** `{url_doc.get('value') or 'not set'}`\n\n"
-                "**Usage:**\n"
-                "• `/dynu <hostname> <api_key_or_password>` — Sync via API Key or IP Update Password\n"
-                "• `/dynu <hostname> <client_id> <client_secret>` — Sync via Dynu OAuth2\n"
-                "• `/dynu off` — Disable Dynu updater\n"
-                "• `/ip` — Get VPS public IPv4"
-            )
-        if args[1].lower() in ("off", "disable", "clear"):
-            await settings_col.delete_many({"key": {"$in": ["dynu_domain", "dynu_password", "dynu_api_key", "dynu_client_id", "dynu_client_secret", "dynu_username", "dynu_url"]}})
-            return await message.reply("🌐 Dynu updater disabled.")
-        if len(args) < 3:
-            return await message.reply("⚠️ Usage:\n• `/dynu <hostname> <api_key_or_password>`\n• `/dynu <hostname> <client_id> <client_secret>`")
-        dom = normalize_dynu_domain(args[1])
-        cid = args[2].strip() if len(args) >= 4 else ""
-        csec = args[3].strip() if len(args) >= 4 else ""
-        pw_or_key = "" if len(args) >= 4 else args[2].strip()
-        status = await message.reply(f"🌐 Updating `{dom}` on Dynu with VPS IP...")
-        ok, res, ip = await update_dynu_once(dom, password=pw_or_key, client_id=cid, client_secret=csec)
-        if not ok:
-            return await status.edit_text(f"❌ **Dynu update failed:** `{res}`")
-        port = int(str(os.getenv("PORT") or getattr(settings, "PORT", None) or "8000").strip())
-        best_url, reachable = await probe_dynu_url(dom, port)
-        now = datetime.datetime.utcnow()
-        await settings_col.update_one({"key": "dns_provider"}, {"$set": {"value": "dynu", "updated_by": user.id, "updated_at": now}}, upsert=True)
-        await settings_col.update_one({"key": "dynu_domain"}, {"$set": {"value": dom, "updated_by": user.id, "updated_at": now}}, upsert=True)
-        if cid and csec:
-            await settings_col.update_one({"key": "dynu_client_id"}, {"$set": {"value": cid, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            await settings_col.update_one({"key": "dynu_client_secret"}, {"$set": {"value": csec, "updated_by": user.id, "updated_at": now}}, upsert=True)
-        else:
-            await settings_col.update_one({"key": "dynu_password"}, {"$set": {"value": pw_or_key, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            await settings_col.update_one({"key": "dynu_api_key"}, {"$set": {"value": pw_or_key if len(pw_or_key) >= 20 else "", "updated_by": user.id, "updated_at": now}}, upsert=True)
-        await settings_col.update_one({"key": "dynu_url"}, {"$set": {"value": best_url, "updated_by": user.id, "updated_at": now}}, upsert=True)
-        if reachable:
-            settings.BACKEND_URL = best_url
-            os.environ["BACKEND_URL"] = best_url
-            await settings_col.update_one({"key": "backend_url"}, {"$set": {"value": best_url, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            await settings_col.update_one({"key": "cloudflare_url"}, {"$set": {"value": best_url, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            settings.BASE_URL = best_url
-            os.environ["BASE_URL"] = best_url
-            await settings_col.update_one({"key": "base_url"}, {"$set": {"value": best_url, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            await settings_col.update_one({"key": "vercel_url"}, {"$set": {"value": best_url, "updated_by": user.id, "updated_at": now}}, upsert=True)
-            rewritten = 0
-            try:
-                rewritten = await rewrite_all_stored_catalog_buttons(best_url)
-            except Exception:
-                pass
-            reach_note = f"✅ **Reachable:** `{best_url}` (auto-activated, `{rewritten}` catalog pages updated)"
-        else:
-            reach_note = (
-                f"⚠️ **DNS Updated, but `{best_url}/health` is not reachable externally yet.**\n"
-                f"• Ensure ports `80` and `443` (or `{port}`) are open and run Caddy for `{dom}`.\n"
-                f"• Meanwhile your `trycloudflare.com` tunnel stays active as fallback."
-            )
-        await status.edit_text(
-            "✅ **Dynu Updated!**\n\n"
-            f"> 🌐 **Host:** `{dom}` (`{res}`)\n"
             f"> 🖥 **Synced IP:** `{ip or 'auto'}`\n"
             f"{reach_note}"
         )

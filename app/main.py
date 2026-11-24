@@ -66,14 +66,18 @@ async def lifespan(app: FastAPI):
                 pass
         import asyncio as _asyncio
         _asyncio.create_task(_bg_backfill())
-        from app.utils.duckdns import start_duckdns_updater
-        from app.utils.dynu import start_dynu_updater, sync_and_activate_active_ddns
+        from app.utils.duckdns import start_duckdns_updater, sync_and_activate_duckdns
+        from app.utils.dynu import start_updater as start_dynu_updater, sync_activate as sync_dynu_activate
         try:
-            await sync_and_activate_active_ddns()
+            await sync_and_activate_duckdns()
         except Exception as _duck_err:
             logger.warning('Startup DuckDNS activation skipped: %s', _duck_err)
         start_cloudflare_auto_tunnel()
         start_duckdns_updater()
+        try:
+            await sync_dynu_activate()
+        except Exception as _dynu_err:
+            logger.warning("Startup Dynu activation skipped: %s", _dynu_err)
         start_dynu_updater()
         session_manager.prepare_bot()
         register_handlers(session_manager.bot_client)
@@ -105,9 +109,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
         from app.utils.duckdns import stop_duckdns_updater
-        from app.utils.dynu import stop_dynu_updater
         await stop_duckdns_updater()
-        await stop_dynu_updater()
         await stop_cloudflare_auto_tunnel()
         await session_manager.stop()
         mongo_client.close()

@@ -108,3 +108,15 @@ Use `/del` in a private chat with the bot (admins only):
 - `/del Exact Page Title`
 
 Deletion is immediate with no confirmation step. The command uses exact slug or exact case-insensitive title matching; partial matches are rejected to prevent accidental deletion. It removes the page from the shared MongoDB `catalog_pages` collection.
+
+## Dynu DDNS (Telegram bot)
+
+The bot supports Dynu DDNS alongside the legacy DuckDNS updater. In Telegram, an authorized admin can use:
+
+- `/dynu` — setup guide and configuration status
+- `/dynu full-hostname dynu-username dynu-password` — configure and update IP (example hostname: `example.webredirect.org`)
+- `/dynu test` — update again and check the app `/health` URL
+- `/dynu off` — remove Dynu credentials/configuration
+- `/ip` — public IP helper (legacy DuckDNS display)
+
+Create a hostname in Dynu Control Panel → Dynamic DNS Service first. The Dynu update API uses the Dynu account username and DDNS password with Basic Authentication. When the app health endpoint is externally reachable, the bot updates backend/base URLs and catalog links. If reachability fails, check firewall ports and/or configure a reverse proxy such as Caddy. HTTPS is not automatically guaranteed by DDNS alone.
