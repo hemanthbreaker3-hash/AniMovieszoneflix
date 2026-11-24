@@ -109,18 +109,20 @@ Use `/del` in a private chat with the bot (admins only):
 
 Deletion is immediate with no confirmation step. The command uses exact slug or exact case-insensitive title matching; partial matches are rejected to prevent accidental deletion. It removes the page from the shared MongoDB `catalog_pages` collection.
 
-## Dynu DDNS (Telegram bot)
+## Dynu DDNS & API (Telegram bot)
 
-The bot supports Dynu DDNS alongside the legacy DuckDNS updater. In Telegram, an authorized admin can use:
+The bot supports Dynu via three separate methods alongside the legacy DuckDNS updater. In Telegram, an authorized admin can use:
 
-- `/dynu` — setup guide and configuration status
-- `/dynu full-hostname dynu-username dynu-password` — configure and update IP (example hostname: `example.webredirect.org`)
-- `/dynu test` — update again and check the app `/health` URL
-- `/dynu off` — remove Dynu credentials/configuration
-- `/ip` — public IP helper (legacy DuckDNS display)
+- `/dynu` — live status (method, masked credentials, DNS/IP verification, Active URL) and in-bot setup guide
+- `/dynuhost <hostname>` — set your full Dynu hostname (e.g. `mybot.dynu.net`)
+- `/dynukey <api_key>` — configure REST API v2 using API Key authentication
+- `/dynuoauth <client_id> <client_secret>` — configure REST API v2 using OAuth2 (auto-fetches & refreshes 8-hour Bearer tokens)
+- `/dynuuser <username>` & `/dynupass <password>` — configure the DDNS IP Update Protocol (`/nic/update`)
+- `/dynu method <api_key|oauth2|ddns>` — switch active method if multiple are saved
+- `/dynu test` — update IP, verify DNS resolution against VPS public IP, and probe `/health`
+- `/dynu off` — clear all Dynu credentials and settings
 
-Create a hostname in Dynu Control Panel → Dynamic DNS Service first. The Dynu update API uses the Dynu account username and DDNS password with Basic Authentication. When the app health endpoint is externally reachable, the bot updates backend/base URLs and catalog links. If reachability fails, check firewall ports and/or configure a reverse proxy such as Caddy. HTTPS is not automatically guaranteed by DDNS alone.
-
+All Dynu credentials are encrypted at rest in MongoDB and are never prompted during deployment.
 
 ### Dynu DDNS (bot-managed)
 

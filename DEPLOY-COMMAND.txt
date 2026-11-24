@@ -39,4 +39,4 @@ export STREAM_CHUNK_SIZE=1048576
 
 ### Dynu DDNS (bot-managed)
 
-Dynu hostname, username, and password are not deployment prompts or environment variables. Configure, test, and remove Dynu entirely through the Telegram bot admin command `/dynu`. Credentials are stored in MongoDB by the bot.
+Dynu credentials (API Key, OAuth2 Client ID/Secret, or DDNS username/password) are not deployment prompts or environment variables. Configure, test, and remove Dynu entirely through the Telegram bot admin commands (`/dynu`, `/dynuhost`, `/dynukey`, `/dynuoauth`, `/dynuuser`, `/dynupass`, `/dynu test`, `/dynu off`). Credentials are encrypted at rest in MongoDB by the bot.

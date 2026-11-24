@@ -110,6 +110,8 @@ async def lifespan(app: FastAPI):
             pass
         from app.utils.duckdns import stop_duckdns_updater
         await stop_duckdns_updater()
+        from app.utils.dynu import stop_updater as stop_dynu_updater
+        await stop_dynu_updater()
         await stop_cloudflare_auto_tunnel()
         await session_manager.stop()
         mongo_client.close()
