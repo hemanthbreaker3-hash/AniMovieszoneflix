@@ -665,6 +665,7 @@ async def probe(host: str, port: int | None = None) -> tuple[str, bool]:
 async def probe_with_details(host: str, port: int | None = None) -> tuple[str, bool, dict[str, Any]]:
     norm_host = normalize_dynu_host(host)
     p = int(port or 8000)
+    local_ok, local_status, _ = await asyncio.to_thread(_probe_url_sync, f"http://127.0.0.1:{p}")
     candidates = [f"https://{norm_host}", f"http://{norm_host}"]
     for x in (p, 8000, 8001):
         u = f"http://{norm_host}" if x == 80 else f"http://{norm_host}:{x}"
@@ -676,10 +677,22 @@ async def probe_with_details(host: str, port: int | None = None) -> tuple[str, b
         ok, status, detail = await asyncio.to_thread(_probe_url_sync, url)
         attempts.append({"url": url, "ok": ok, "status": status})
         if ok:
-            return url, True, {"status_code": status, "health_body": detail[:120], "attempts": attempts}
+            return url, True, {
+                "status_code": status,
+                "health_body": detail[:120],
+                "local_healthy": local_ok,
+                "local_status": local_status,
+                "attempts": attempts,
+            }
 
     fallback = f"http://{norm_host}" if p == 80 else f"http://{norm_host}:{p}"
-    return fallback, False, {"status_code": None, "health_body": "", "attempts": attempts}
+    return fallback, False, {
+        "status_code": None,
+        "health_body": "",
+        "local_healthy": local_ok,
+        "local_status": local_status,
+        "attempts": attempts,
+    }
 
 
 async def sync_activate(updated_by: int | None = None) -> tuple[bool, str, str | None, str | None, bool]:
@@ -723,6 +736,7 @@ async def sync_activate_detailed(
         settings.BACKEND_URL = url
         os.environ["BACKEND_URL"] = url
         await settings_col.update_one({"key": "backend_url"}, {"$set": meta}, upsert=True)
+        await settings_col.update_one({"key": "cloudflare_url"}, {"$set": meta}, upsert=True)
         base = await settings_col.find_one({"key": "base_url"}) or {}
         current = str(base.get("value") or "").lower()
         is_explicit_custom = ".pages.dev" in current or (
@@ -735,6 +749,7 @@ async def sync_activate_detailed(
             settings.BASE_URL = url
             os.environ["BASE_URL"] = url
             await settings_col.update_one({"key": "base_url"}, {"$set": meta}, upsert=True)
+            await settings_col.update_one({"key": "vercel_url"}, {"$set": meta}, upsert=True)
         try:
             from app.cms import rewrite_all_stored_catalog_buttons
 
@@ -752,6 +767,7 @@ async def sync_activate_detailed(
         "active_url": url,
         "reachable": reachable,
         "health_status": probe_info.get("status_code"),
+        "local_healthy": probe_info.get("local_healthy", False),
         "checked_at": now.isoformat() + "Z",
     }
     await save_dynu_setting("dynu_last_status", details, encrypt=False, updated_by=updated_by)

@@ -2354,6 +2354,14 @@ def register_handlers(bot):
             dns_match = "✅ Matches VPS IP" if details.get("dns_match") else "⚠️ Propagation pending / mismatch"
             health_code = details.get("health_status")
             health_str = f"HTTP {health_code}" if health_code else ("OK" if reach else "unreachable")
+            extra_note = ""
+            if not reach:
+                local_ok = details.get("local_healthy")
+                extra_note = (
+                    "\n\n⚠️ **External `/health` is unreachable** "
+                    + ("(local app is healthy — open ports `80`/`443` and re-run `./deploy.vps` to configure Caddy HTTPS reverse proxy)."
+                       if local_ok else "(local app `/health` did not respond; check container logs).")
+                )
             return await status.edit_text(
                 f"✅ **Dynu Verified & Updated** (`{details.get('method')}`)\n\n"
                 f"> **Result:** `{res}`\n"
@@ -2361,6 +2369,7 @@ def register_handlers(bot):
                 f"> **DNS Resolved IP(s):** `{dns_ips}` ({dns_match})\n"
                 f"> **Active URL:** `{url}`\n"
                 f"> **Health Check:** `{reach}` ({health_str})"
+                + extra_note
             )
 
         cfg = await get_full_config()

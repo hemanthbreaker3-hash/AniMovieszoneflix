@@ -201,7 +201,7 @@ PY2
       info "No Cloudflare account token is required for quick tunnels."
     fi
 
-    # Auto-configure DuckDNS + Caddy HTTPS reverse proxy (reads .env first, falls back to MongoDB settings)
+    # Auto-configure DuckDNS & Dynu + Caddy HTTPS reverse proxy (reads .env / MongoDB, never prompts)
     DUCK_INFO="$(python3 - <<'PY_DUCK'
 import json, pathlib
 v={}
@@ -231,23 +231,31 @@ PY_DUCK
         DUCK_TOK="${MONGO_DUCK#*|}"
       fi
     fi
+
+    DYNU_HOST="$("${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.dynu import get_full_config; c=asyncio.run(get_full_config()); print(c.get('hostname',''))" 2>/dev/null | tail -n 1 || true)"
+    DYNU_HOST="$(printf '%s' "$DYNU_HOST" | tr -d '\r\n ')"
+
+    # Open HTTP/HTTPS/App ports in host firewall if active
+    if command -v ufw >/dev/null 2>&1 && run_root ufw status 2>/dev/null | grep -qi "Status: active"; then
+      run_root ufw allow 80/tcp >/dev/null 2>&1 || true
+      run_root ufw allow 443/tcp >/dev/null 2>&1 || true
+      run_root ufw allow "${PORT_VALUE}/tcp" >/dev/null 2>&1 || true
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1 && run_root firewall-cmd --state >/dev/null 2>&1; then
+      run_root firewall-cmd --permanent --add-service=http >/dev/null 2>&1 || true
+      run_root firewall-cmd --permanent --add-service=https >/dev/null 2>&1 || true
+      run_root firewall-cmd --permanent --add-port="${PORT_VALUE}/tcp" >/dev/null 2>&1 || true
+      run_root firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+
     if [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; then
-      info "Configuring DuckDNS (${DUCK_DOM}.duckdns.org) + Caddy HTTPS -> 127.0.0.1:${PORT_VALUE}..."
       PUBLIC_IP="$(curl -fsS --max-time 6 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 6 https://ifconfig.me/ip 2>/dev/null || true)"
       curl -fsS --max-time 10 "https://www.duckdns.org/update?domains=${DUCK_DOM}&token=${DUCK_TOK}&ip=${PUBLIC_IP}" >/dev/null 2>&1 || warn "DuckDNS initial update returned an error"
-      if command -v ufw >/dev/null 2>&1 && run_root ufw status 2>/dev/null | grep -qi "Status: active"; then
-        run_root ufw allow 80/tcp >/dev/null 2>&1 || true
-        run_root ufw allow 443/tcp >/dev/null 2>&1 || true
-        run_root ufw allow "${PORT_VALUE}/tcp" >/dev/null 2>&1 || true
-      fi
-      if command -v firewall-cmd >/dev/null 2>&1 && run_root firewall-cmd --state >/dev/null 2>&1; then
-        run_root firewall-cmd --permanent --add-service=http >/dev/null 2>&1 || true
-        run_root firewall-cmd --permanent --add-service=https >/dev/null 2>&1 || true
-        run_root firewall-cmd --permanent --add-port="${PORT_VALUE}/tcp" >/dev/null 2>&1 || true
-        run_root firewall-cmd --reload >/dev/null 2>&1 || true
-      fi
+    fi
+
+    if { [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; } || [ -n "$DYNU_HOST" ]; then
       if ! command -v caddy >/dev/null 2>&1; then
-        info "Installing Caddy for automatic HTTPS (${DUCK_DOM}.duckdns.org)..."
+        info "Installing Caddy for automatic HTTPS reverse proxy..."
         if command -v apt-get >/dev/null 2>&1; then
           run_root apt-get update -qq || true
           run_root apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl gnupg || true
@@ -261,24 +269,52 @@ PY_DUCK
       fi
       if command -v caddy >/dev/null 2>&1; then
         run_root mkdir -p /etc/caddy
-        printf "%s.duckdns.org {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:%s {\n        flush_interval -1\n    }\n}\n" "$DUCK_DOM" "$PORT_VALUE" | run_root tee /etc/caddy/Caddyfile >/dev/null
+        CADDY_CONF=""
+        if [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; then
+          info "Adding Caddy HTTPS reverse proxy for ${DUCK_DOM}.duckdns.org -> 127.0.0.1:${PORT_VALUE}"
+          CADDY_CONF+="${DUCK_DOM}.duckdns.org {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
+        fi
+        if [ -n "$DYNU_HOST" ]; then
+          info "Adding Caddy HTTPS reverse proxy for ${DYNU_HOST} -> 127.0.0.1:${PORT_VALUE}"
+          CADDY_CONF+="${DYNU_HOST} {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:${PORT_VALUE} {\n        flush_interval -1\n    }\n}\n\n"
+        fi
+        printf "%b" "$CADDY_CONF" | run_root tee /etc/caddy/Caddyfile >/dev/null
         run_root systemctl enable --now caddy >/dev/null 2>&1 || true
         run_root systemctl reload caddy >/dev/null 2>&1 || run_root systemctl restart caddy >/dev/null 2>&1 || true
-        info "Verifying external HTTPS https://${DUCK_DOM}.duckdns.org/health ..."
-        DUCK_HTTPS_OK=0
-        for _ in 1 2 3 4 5 6; do
-          if curl -fsS --max-time 8 "https://${DUCK_DOM}.duckdns.org/health" >/dev/null 2>&1; then
-            DUCK_HTTPS_OK=1
-            break
+
+        if [ -n "$DUCK_DOM" ] && [ -n "$DUCK_TOK" ]; then
+          info "Verifying external HTTPS https://${DUCK_DOM}.duckdns.org/health ..."
+          DUCK_HTTPS_OK=0
+          for _ in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 8 "https://${DUCK_DOM}.duckdns.org/health" >/dev/null 2>&1; then
+              DUCK_HTTPS_OK=1; break
+            fi
+            sleep 5
+          done
+          if [ "$DUCK_HTTPS_OK" -eq 1 ]; then
+            info "External HTTPS verified: https://${DUCK_DOM}.duckdns.org/health"
+          else
+            warn "https://${DUCK_DOM}.duckdns.org/health is not reachable externally yet (check cloud Security Group / NSG for ports 80 & 443)."
           fi
-          sleep 5
-        done
-        if [ "$DUCK_HTTPS_OK" -eq 1 ]; then
-          info "External HTTPS verified: https://${DUCK_DOM}.duckdns.org/health"
-        else
-          warn "https://${DUCK_DOM}.duckdns.org/health is not reachable externally yet (check cloud provider Security Group / NSG for ports 80 & 443; Cloudflare tunnel remains active as fallback)."
+          "${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.duckdns import sync_and_activate_duckdns; print(asyncio.run(sync_and_activate_duckdns()))" >/dev/null 2>&1 || true
         fi
-        "${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.duckdns import sync_and_activate_duckdns; print(asyncio.run(sync_and_activate_duckdns()))" >/dev/null 2>&1 || true
+
+        if [ -n "$DYNU_HOST" ]; then
+          info "Verifying external HTTPS https://${DYNU_HOST}/health ..."
+          DYNU_HTTPS_OK=0
+          for _ in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 8 "https://${DYNU_HOST}/health" >/dev/null 2>&1; then
+              DYNU_HTTPS_OK=1; break
+            fi
+            sleep 5
+          done
+          if [ "$DYNU_HTTPS_OK" -eq 1 ]; then
+            info "External HTTPS verified: https://${DYNU_HOST}/health"
+          else
+            warn "https://${DYNU_HOST}/health is not reachable externally yet (check cloud Security Group / NSG for ports 80 & 443)."
+          fi
+          "${COMPOSE[@]}" exec -T web python3 -c "import asyncio; from app.utils.dynu import sync_activate; print(asyncio.run(sync_activate()))" >/dev/null 2>&1 || true
+        fi
       else
         warn "Could not install Caddy automatically; Cloudflare tunnel remains active as fallback."
       fi
