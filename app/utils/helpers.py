@@ -133,7 +133,7 @@ def is_trycloudflare_url(value: str | None) -> bool:
             host == "ngrok-free.app" or host.endswith(".ngrok-free.app")
             or host == "ngrok-free.dev" or host.endswith(".ngrok-free.dev")
             or host == "ngrok.io" or host.endswith(".ngrok.io")
-            or host == "trycloudflare.com" or host.endswith((".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev", ".ngrok.io", ".duckdns.org"))
+            or host == "trycloudflare.com" or host.endswith((".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev", ".ngrok.io", ".duckdns.org", ".dynv6.net", ".dns.army", ".dns.navy"))
         )
     except Exception:
         return False
@@ -192,7 +192,7 @@ def rewrite_media_or_button_url(target_url: str, cloudflare_base: str | None, fo
     should_replace_domain = (
         force_replace_domain
         or parsed.path.startswith(media_prefixes)
-        or host.endswith((".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev", ".ngrok.io", ".duckdns.org"))
+        or host.endswith((".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev", ".ngrok.io", ".duckdns.org", ".dynv6.net", ".dns.army", ".dns.navy"))
         or host.endswith((".vercel.app", ".pages.dev"))
     )
     if should_replace_domain:
